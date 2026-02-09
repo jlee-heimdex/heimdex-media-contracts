@@ -16,8 +16,8 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-# Enforced format: {video_id}_scene_{index:03d}
-_SCENE_ID_PATTERN = re.compile(r"^.+_scene_\d{3,}$")
+# {video_id}_scene_{index} — index is \d+ (any width; 03d is convention, not enforced)
+_SCENE_ID_PATTERN = re.compile(r"^.+_scene_\d+$")
 
 
 class SceneBoundary(BaseModel):
@@ -35,7 +35,7 @@ class SceneBoundary(BaseModel):
     def _validate_scene_id(cls, v: str) -> str:
         if not _SCENE_ID_PATTERN.match(v):
             raise ValueError(
-                f"scene_id must match '{{video_id}}_scene_{{index:03d}}', got {v!r}"
+                f"scene_id must match '{{video_id}}_scene_{{index}}', got {v!r}"
             )
         return v
 
@@ -74,7 +74,7 @@ class SceneDocument(BaseModel):
     def _validate_scene_id(cls, v: str) -> str:
         if not _SCENE_ID_PATTERN.match(v):
             raise ValueError(
-                f"scene_id must match '{{video_id}}_scene_{{index:03d}}', got {v!r}"
+                f"scene_id must match '{{video_id}}_scene_{{index}}', got {v!r}"
             )
         return v
 

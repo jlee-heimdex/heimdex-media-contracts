@@ -34,15 +34,15 @@ class TestSceneBoundary:
                 keyframe_timestamp_ms=500,
             )
 
-    def test_scene_id_requires_three_digit_index(self):
-        with pytest.raises(ValidationError, match="scene_id"):
-            SceneBoundary(
-                scene_id="vid_scene_1",
-                index=1,
-                start_ms=0,
-                end_ms=1000,
-                keyframe_timestamp_ms=500,
-            )
+    def test_scene_id_accepts_single_digit_index(self):
+        b = SceneBoundary(
+            scene_id="vid_scene_1",
+            index=1,
+            start_ms=0,
+            end_ms=1000,
+            keyframe_timestamp_ms=500,
+        )
+        assert b.scene_id == "vid_scene_1"
 
     def test_scene_id_accepts_long_index(self):
         b = SceneBoundary(
@@ -53,6 +53,16 @@ class TestSceneBoundary:
             keyframe_timestamp_ms=500,
         )
         assert b.scene_id == "vid_scene_0001"
+
+    def test_scene_id_rejects_missing_index(self):
+        with pytest.raises(ValidationError, match="scene_id"):
+            SceneBoundary(
+                scene_id="vid_scene_",
+                index=0,
+                start_ms=0,
+                end_ms=1000,
+                keyframe_timestamp_ms=500,
+            )
 
     def test_end_before_start_rejected(self):
         with pytest.raises(ValidationError, match="end_ms"):

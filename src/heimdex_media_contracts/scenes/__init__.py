@@ -1,6 +1,8 @@
 """Scene detection schemas and pure merge functions."""
 
 from heimdex_media_contracts.scenes.merge import (
+    SegmentInput,
+    SpeechSegmentLike,
     aggregate_transcript,
     assign_segments_to_scenes,
 )
@@ -14,6 +16,8 @@ __all__ = [
     "SceneBoundary",
     "SceneDocument",
     "SceneDetectionResult",
+    "SpeechSegmentLike",
+    "SegmentInput",
     "assign_segments_to_scenes",
     "aggregate_transcript",
 ]

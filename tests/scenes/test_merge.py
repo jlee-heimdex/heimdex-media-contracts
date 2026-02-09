@@ -1,10 +1,20 @@
+from dataclasses import dataclass
+
 import pytest
 
 from heimdex_media_contracts.scenes.merge import (
+    SpeechSegmentLike,
     aggregate_transcript,
     assign_segments_to_scenes,
 )
 from heimdex_media_contracts.scenes.schemas import SceneBoundary
+
+
+@dataclass
+class FakeSegment:
+    start: float
+    end: float
+    text: str
 
 
 def _boundary(scene_id: str, index: int, start_ms: int, end_ms: int) -> SceneBoundary:
@@ -120,3 +130,32 @@ class TestAggregateTranscript:
     def test_missing_text_key_skipped(self):
         segs = [{"start": 0, "end": 1}, {"start": 1, "end": 2, "text": "kept"}]
         assert aggregate_transcript(segs) == "kept"
+
+
+class TestProtocolInputs:
+    def test_dataclass_satisfies_protocol(self):
+        seg = FakeSegment(start=1.0, end=2.0, text="hello")
+        assert isinstance(seg, SpeechSegmentLike)
+
+    def test_assign_with_typed_objects(self):
+        scenes = [_boundary("v_scene_000", 0, 0, 10000)]
+        segments = [FakeSegment(start=1.0, end=3.0, text="typed")]
+        result = assign_segments_to_scenes(scenes, segments)
+        assert len(result["v_scene_000"]) == 1
+        assert result["v_scene_000"][0].text == "typed"
+
+    def test_aggregate_with_typed_objects(self):
+        segments = [
+            FakeSegment(start=0, end=1, text="hello"),
+            FakeSegment(start=1, end=2, text="world"),
+        ]
+        assert aggregate_transcript(segments) == "hello world"
+
+    def test_mixed_dict_and_typed_objects(self):
+        scenes = [_boundary("v_scene_000", 0, 0, 10000)]
+        segments = [
+            {"start": 1.0, "end": 2.0, "text": "dict_seg"},
+            FakeSegment(start=3.0, end=4.0, text="typed_seg"),
+        ]
+        result = assign_segments_to_scenes(scenes, segments)
+        assert len(result["v_scene_000"]) == 2
