@@ -1,0 +1,19 @@
+"""Scene detection schemas and pure merge functions."""
+
+from heimdex_media_contracts.scenes.merge import (
+    aggregate_transcript,
+    assign_segments_to_scenes,
+)
+from heimdex_media_contracts.scenes.schemas import (
+    SceneBoundary,
+    SceneDetectionResult,
+    SceneDocument,
+)
+
+__all__ = [
+    "SceneBoundary",
+    "SceneDocument",
+    "SceneDetectionResult",
+    "assign_segments_to_scenes",
+    "aggregate_transcript",
+]
