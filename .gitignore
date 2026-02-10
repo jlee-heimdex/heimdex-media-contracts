@@ -1,0 +1,99 @@
+# --------------------
+# Python
+# --------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+*.pyz
+*.pyzw
+sdist/
+wheels/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# mypy / type checkers
+.mypy_cache/
+.pytype/
+.pyre/
+
+# Ruff
+.ruff_cache/
+
+# --------------------
+# Secrets & credentials
+# --------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials.json
+service-account*.json
+secrets.yaml
+secrets.yml
+*.secret
+
+# --------------------
+# IDE & editor
+# --------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# --------------------
+# OS files
+# --------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --------------------
+# AI / coding agents
+# --------------------
+.sisyphus/
+.claude/
+.cursor/
+.aider*
+.codeium/
+.continue/
+.copilot/
+.tabnine/
+.windsurf/
+.cody/
+.sourcegraph/
+
+# --------------------
+# Docker (local dev)
+# --------------------
+docker-compose.override.yml
