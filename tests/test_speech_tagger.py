@@ -10,6 +10,7 @@ import pytest
 from heimdex_media_contracts.speech.schemas import SpeechSegment, TaggedSegment
 from heimdex_media_contracts.speech.tagger import (
     DEFAULT_KEYWORD_DICT,
+    PRODUCT_KEYWORD_DICT,
     SpeechTagger,
 )
 
@@ -146,9 +147,121 @@ class TestDefaultKeywordDict:
     def test_has_expected_categories(self):
         assert set(DEFAULT_KEYWORD_DICT.keys()) == {
             "price", "benefit", "feature", "bundle", "cta",
+            "delivery", "coupon", "comparison", "tutorial", "qna",
         }
 
     def test_all_values_are_nonempty_lists(self):
         for cat, keywords in DEFAULT_KEYWORD_DICT.items():
             assert isinstance(keywords, list), f"{cat} should be a list"
             assert len(keywords) > 0, f"{cat} should not be empty"
+
+
+class TestProductKeywordDict:
+    def test_has_expected_categories(self):
+        assert set(PRODUCT_KEYWORD_DICT.keys()) == {
+            "skincare", "makeup", "mask", "bodycare", "haircare",
+        }
+
+    def test_all_values_are_nonempty_lists(self):
+        for cat, keywords in PRODUCT_KEYWORD_DICT.items():
+            assert isinstance(keywords, list), f"{cat} should be a list"
+            assert len(keywords) > 0, f"{cat} should not be empty"
+
+
+class TestExtendedDefaultCategories:
+    def test_default_dict_has_10_categories(self):
+        assert len(DEFAULT_KEYWORD_DICT) == 10
+
+    def test_delivery_keyword_matches(self):
+        tagger = SpeechTagger()
+        seg = SpeechSegment(
+            start=0.0, end=5.0,
+            text="배송이 빠릅니다",
+            confidence=0.9,
+        )
+        result = tagger.tag([seg])
+        assert "delivery" in result[0].tags
+
+    def test_coupon_keyword_matches(self):
+        tagger = SpeechTagger()
+        seg = SpeechSegment(
+            start=0.0, end=5.0,
+            text="쿠폰을 사용하세요",
+            confidence=0.9,
+        )
+        result = tagger.tag([seg])
+        assert "coupon" in result[0].tags
+
+    def test_comparison_keyword_matches(self):
+        tagger = SpeechTagger()
+        seg = SpeechSegment(
+            start=0.0, end=5.0,
+            text="다른 제품과 비교해보세요",
+            confidence=0.9,
+        )
+        result = tagger.tag([seg])
+        assert "comparison" in result[0].tags
+
+    def test_tutorial_keyword_matches(self):
+        tagger = SpeechTagger()
+        seg = SpeechSegment(
+            start=0.0, end=5.0,
+            text="사용법을 알려드립니다",
+            confidence=0.9,
+        )
+        result = tagger.tag([seg])
+        assert "tutorial" in result[0].tags
+
+    def test_qna_keyword_matches(self):
+        tagger = SpeechTagger()
+        seg = SpeechSegment(
+            start=0.0, end=5.0,
+            text="질문이 있으신가요",
+            confidence=0.9,
+        )
+        result = tagger.tag([seg])
+        assert "qna" in result[0].tags
+
+
+class TestProductTagger:
+    def test_skincare_keyword_matches(self):
+        tagger = SpeechTagger(keyword_dict=PRODUCT_KEYWORD_DICT)
+        seg = SpeechSegment(
+            start=0.0, end=5.0,
+            text="수분크림을 추천합니다",
+            confidence=0.9,
+        )
+        result = tagger.tag([seg])
+        assert "skincare" in result[0].tags
+
+    def test_makeup_keyword_matches(self):
+        tagger = SpeechTagger(keyword_dict=PRODUCT_KEYWORD_DICT)
+        seg = SpeechSegment(
+            start=0.0, end=5.0,
+            text="파운데이션이 좋습니다",
+            confidence=0.9,
+        )
+        result = tagger.tag([seg])
+        assert "makeup" in result[0].tags
+
+    def test_no_false_positive_on_unrelated_word(self):
+        tagger = SpeechTagger(keyword_dict=PRODUCT_KEYWORD_DICT)
+        seg = SpeechSegment(
+            start=0.0, end=5.0,
+            text="안녕하세요",
+            confidence=0.9,
+        )
+        result = tagger.tag([seg])
+        assert result[0].tags == []
+
+    def test_combined_dict_works(self):
+        combined = {**DEFAULT_KEYWORD_DICT, **PRODUCT_KEYWORD_DICT}
+        tagger = SpeechTagger(keyword_dict=combined)
+        seg = SpeechSegment(
+            start=0.0, end=5.0,
+            text="이 수분크림은 가격이 좋습니다",
+            confidence=0.9,
+        )
+        result = tagger.tag([seg])
+        assert "skincare" in result[0].tags
+        assert "price" in result[0].tags

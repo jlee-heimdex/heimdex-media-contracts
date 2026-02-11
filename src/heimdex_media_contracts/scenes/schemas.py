@@ -69,6 +69,15 @@ class SceneDocument(BaseModel):
     thumbnail_path: Optional[str] = None
     thumbnail_url: Optional[str] = None
 
+    keyword_tags: List[str] = Field(default_factory=list)
+    product_tags: List[str] = Field(default_factory=list)
+    product_entities: List[str] = Field(default_factory=list)
+
+    @property
+    def duration_ms(self) -> int:
+        """Scene duration in milliseconds (convenience for scoring)."""
+        return self.end_ms - self.start_ms
+
     @field_validator("scene_id")
     @classmethod
     def _validate_scene_id(cls, v: str) -> str:

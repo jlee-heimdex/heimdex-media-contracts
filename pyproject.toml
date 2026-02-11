@@ -1,6 +1,6 @@
 [project]
 name = "heimdex-media-contracts"
-version = "0.2.0"
+version = "0.3.0"
 description = "Shared schemas, pure functions, and contracts for Heimdex media pipelines"
 readme = "README.md"
 requires-python = ">=3.11"

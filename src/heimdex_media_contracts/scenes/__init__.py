@@ -3,6 +3,7 @@
 from heimdex_media_contracts.scenes.merge import (
     SegmentInput,
     SpeechSegmentLike,
+    aggregate_scene_tags,
     aggregate_transcript,
     assign_segments_to_scenes,
 )
@@ -19,5 +20,6 @@ __all__ = [
     "SpeechSegmentLike",
     "SegmentInput",
     "assign_segments_to_scenes",
+    "aggregate_scene_tags",
     "aggregate_transcript",
 ]

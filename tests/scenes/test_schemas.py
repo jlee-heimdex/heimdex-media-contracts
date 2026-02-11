@@ -153,6 +153,94 @@ class TestSceneDocument:
         restored = SceneDocument(**data)
         assert restored == doc
 
+    def test_keyword_tags_default_to_empty_list(self):
+        doc = SceneDocument(
+            scene_id="vid_scene_000",
+            video_id="vid",
+            index=0,
+            start_ms=0,
+            end_ms=5000,
+            keyframe_timestamp_ms=2500,
+        )
+        assert doc.keyword_tags == []
+
+    def test_product_tags_default_to_empty_list(self):
+        doc = SceneDocument(
+            scene_id="vid_scene_000",
+            video_id="vid",
+            index=0,
+            start_ms=0,
+            end_ms=5000,
+            keyframe_timestamp_ms=2500,
+        )
+        assert doc.product_tags == []
+
+    def test_product_entities_default_to_empty_list(self):
+        doc = SceneDocument(
+            scene_id="vid_scene_000",
+            video_id="vid",
+            index=0,
+            start_ms=0,
+            end_ms=5000,
+            keyframe_timestamp_ms=2500,
+        )
+        assert doc.product_entities == []
+
+    def test_roundtrip_with_new_tag_fields(self):
+        doc = SceneDocument(
+            scene_id="vid_scene_003",
+            video_id="vid",
+            index=3,
+            start_ms=0,
+            end_ms=10000,
+            keyframe_timestamp_ms=5000,
+            keyword_tags=["tag1", "tag2"],
+            product_tags=["product_a", "product_b"],
+            product_entities=["entity_x", "entity_y"],
+        )
+        data = doc.model_dump()
+        restored = SceneDocument(**data)
+        assert restored == doc
+        assert restored.keyword_tags == ["tag1", "tag2"]
+        assert restored.product_tags == ["product_a", "product_b"]
+        assert restored.product_entities == ["entity_x", "entity_y"]
+
+    def test_duration_ms_property(self):
+        doc = SceneDocument(
+            scene_id="vid_scene_000",
+            video_id="vid",
+            index=0,
+            start_ms=1000,
+            end_ms=6000,
+            keyframe_timestamp_ms=3500,
+        )
+        assert doc.duration_ms == 5000
+
+    def test_duration_ms_zero_duration(self):
+        doc = SceneDocument(
+            scene_id="vid_scene_000",
+            video_id="vid",
+            index=0,
+            start_ms=5000,
+            end_ms=5000,
+            keyframe_timestamp_ms=5000,
+        )
+        assert doc.duration_ms == 0
+
+    def test_backward_compat_v1_data_without_new_fields(self):
+        data = {
+            "scene_id": "vid_scene_000",
+            "video_id": "vid",
+            "index": 0,
+            "start_ms": 0,
+            "end_ms": 5000,
+            "keyframe_timestamp_ms": 2500,
+        }
+        doc = SceneDocument(**data)
+        assert doc.keyword_tags == []
+        assert doc.product_tags == []
+        assert doc.product_entities == []
+
 
 class TestSceneDetectionResult:
     def _make_result(self, **overrides: Any) -> SceneDetectionResult:

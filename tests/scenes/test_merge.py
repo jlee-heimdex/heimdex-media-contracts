@@ -4,10 +4,12 @@ import pytest
 
 from heimdex_media_contracts.scenes.merge import (
     SpeechSegmentLike,
+    aggregate_scene_tags,
     aggregate_transcript,
     assign_segments_to_scenes,
 )
 from heimdex_media_contracts.scenes.schemas import SceneBoundary
+from heimdex_media_contracts.speech.schemas import TaggedSegment
 
 
 @dataclass
@@ -159,3 +161,53 @@ class TestProtocolInputs:
         ]
         result = assign_segments_to_scenes(scenes, segments)
         assert len(result["v_scene_000"]) == 2
+
+
+class TestAggregateSceneTags:
+    def test_empty_segments_returns_empty_list(self):
+        result = aggregate_scene_tags([])
+        assert result == []
+
+    def test_single_segment_with_tags(self):
+        segments = [TaggedSegment(start=0.0, end=1.0, text="hello", tags=["tag1", "tag2"])]
+        result = aggregate_scene_tags(segments)
+        assert result == ["tag1", "tag2"]
+
+    def test_single_segment_with_tags_sorted(self):
+        segments = [TaggedSegment(start=0.0, end=1.0, text="hello", tags=["zebra", "apple", "banana"])]
+        result = aggregate_scene_tags(segments)
+        assert result == ["apple", "banana", "zebra"]
+
+    def test_multiple_segments_with_tags_deduplicated(self):
+        segments = [
+            TaggedSegment(start=0.0, end=1.0, text="hello", tags=["tag1", "tag2"]),
+            TaggedSegment(start=1.0, end=2.0, text="world", tags=["tag2", "tag3"]),
+        ]
+        result = aggregate_scene_tags(segments)
+        assert result == ["tag1", "tag2", "tag3"]
+
+    def test_overlapping_tags_from_multiple_segments_deduplicated_sorted(self):
+        segments = [
+            TaggedSegment(start=0.0, end=1.0, text="seg1", tags=["zebra", "apple"]),
+            TaggedSegment(start=1.0, end=2.0, text="seg2", tags=["banana", "apple"]),
+            TaggedSegment(start=2.0, end=3.0, text="seg3", tags=["cherry", "zebra"]),
+        ]
+        result = aggregate_scene_tags(segments)
+        assert result == ["apple", "banana", "cherry", "zebra"]
+
+    def test_segments_with_no_tags_returns_empty_list(self):
+        segments = [
+            TaggedSegment(start=0.0, end=1.0, text="seg1", tags=[]),
+            TaggedSegment(start=1.0, end=2.0, text="seg2", tags=[]),
+        ]
+        result = aggregate_scene_tags(segments)
+        assert result == []
+
+    def test_mixed_segments_some_with_tags_some_without(self):
+        segments = [
+            TaggedSegment(start=0.0, end=1.0, text="seg1", tags=["tag1"]),
+            TaggedSegment(start=1.0, end=2.0, text="seg2", tags=[]),
+            TaggedSegment(start=2.0, end=3.0, text="seg3", tags=["tag2", "tag1"]),
+        ]
+        result = aggregate_scene_tags(segments)
+        assert result == ["tag1", "tag2"]

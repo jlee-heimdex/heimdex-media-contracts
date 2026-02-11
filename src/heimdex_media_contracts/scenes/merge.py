@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Protocol, Sequence, Union, runtime_checkable
 
 from heimdex_media_contracts.scenes.schemas import SceneBoundary
+from heimdex_media_contracts.speech.schemas import TaggedSegment
 
 
 @runtime_checkable
@@ -100,3 +101,11 @@ def aggregate_transcript(segments: Sequence[SegmentInput]) -> str:
     """
     texts = [_get_text(seg).strip() for seg in segments if _get_text(seg).strip()]
     return " ".join(texts)
+
+
+def aggregate_scene_tags(segments: Sequence[TaggedSegment]) -> list[str]:
+    """Deduplicated, sorted union of all segment tags within a scene."""
+    tags: set[str] = set()
+    for seg in segments:
+        tags.update(seg.tags)
+    return sorted(tags)

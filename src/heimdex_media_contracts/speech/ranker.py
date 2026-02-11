@@ -6,28 +6,52 @@ Migrated from:
 
 from heimdex_media_contracts.speech.schemas import RankedSegment, TaggedSegment
 
+DEFAULT_TAG_WEIGHTS: dict[str, float] = {
+    "cta": 1.0,
+    "price": 0.9,
+    "benefit": 0.7,
+    "coupon": 0.7,
+    "feature": 0.5,
+    "bundle": 0.5,
+    "comparison": 0.4,
+    "tutorial": 0.4,
+    "qna": 0.3,
+    "delivery": 0.2,
+}
+
 
 class SegmentRanker:
     """Assign importance ranks to tagged speech segments."""
 
     def __init__(self, weights: dict[str, float] | None = None):
-        self.weights = weights or {
-            "highlight": 1.0,
-            "important": 0.8,
-            "question": 0.6,
-            "answer": 0.5,
-            "transition": 0.2,
-        }
+        self.weights = weights if weights is not None else dict(DEFAULT_TAG_WEIGHTS)
+
+    def _score_segment(self, seg: TaggedSegment) -> float:
+        if not seg.tags:
+            return 0.0
+
+        weighted_sum = sum(
+            self.weights.get(tag, 0.1) * seg.tag_scores.get(tag, 0.0)
+            for tag in seg.tags
+        )
+        max_possible = sum(
+            self.weights.get(tag, 0.1)
+            for tag in seg.tags
+        )
+        if max_possible == 0:
+            return 0.0
+
+        return min(1.0, weighted_sum / max_possible)
 
     def rank(self, segments: list[TaggedSegment]) -> list[RankedSegment]:
-        """Return *segments* with rank and importance_score assigned.
+        scored = [
+            (self._score_segment(seg), seg)
+            for seg in segments
+        ]
+        scored.sort(key=lambda pair: pair[0], reverse=True)
 
-        .. note:: Ranking logic is a stub — segments are numbered sequentially
-           with ``importance_score = 0.0``.  A real implementation will compute
-           scores based on tag weights and context.
-        """
         ranked: list[RankedSegment] = []
-        for i, seg in enumerate(segments):
+        for i, (score, seg) in enumerate(scored):
             ranked.append(
                 RankedSegment(
                     start=seg.start,
@@ -37,7 +61,7 @@ class SegmentRanker:
                     tags=seg.tags,
                     tag_scores=seg.tag_scores,
                     rank=i + 1,
-                    importance_score=0.0,
+                    importance_score=round(score, 4),
                 )
             )
         return ranked
