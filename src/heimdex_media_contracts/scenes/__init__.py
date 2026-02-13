@@ -6,6 +6,7 @@ from heimdex_media_contracts.scenes.merge import (
     aggregate_scene_tags,
     aggregate_transcript,
     assign_segments_to_scenes,
+    merge_ocr_into_scene,
 )
 from heimdex_media_contracts.scenes.schemas import (
     SceneBoundary,
@@ -22,4 +23,5 @@ __all__ = [
     "assign_segments_to_scenes",
     "aggregate_scene_tags",
     "aggregate_transcript",
+    "merge_ocr_into_scene",
 ]

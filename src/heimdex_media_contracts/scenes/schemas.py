@@ -73,6 +73,11 @@ class SceneDocument(BaseModel):
     product_tags: List[str] = Field(default_factory=list)
     product_entities: List[str] = Field(default_factory=list)
 
+    # OCR fields — added in v0.4.0.  All default to empty/zero so that
+    # existing code constructing SceneDocument without OCR is unaffected.
+    ocr_text_raw: str = ""
+    ocr_char_count: int = 0
+
     @property
     def duration_ms(self) -> int:
         """Scene duration in milliseconds (convenience for scoring)."""

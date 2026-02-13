@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Protocol, Sequence, Union, runtime_checkable
 
-from heimdex_media_contracts.scenes.schemas import SceneBoundary
+from heimdex_media_contracts.ocr.gating import gate_ocr_text
+from heimdex_media_contracts.ocr.schemas import OCRSceneResult
+from heimdex_media_contracts.scenes.schemas import SceneBoundary, SceneDocument
 from heimdex_media_contracts.speech.schemas import TaggedSegment
 
 
@@ -109,3 +111,34 @@ def aggregate_scene_tags(segments: Sequence[TaggedSegment]) -> list[str]:
     for seg in segments:
         tags.update(seg.tags)
     return sorted(tags)
+
+
+def merge_ocr_into_scene(
+    scene: SceneDocument,
+    ocr: OCRSceneResult | None,
+) -> SceneDocument:
+    """Merge OCR results into a scene document (additive, never replaces transcript).
+
+    Applies gating rules from OCR_MINIMAL_CONTEXT_CONTRACT.md:
+      - gate_ocr_text() handles min_chars, noise ratio, max_length
+      - ocr_char_count is auto-computed from gated text
+
+    Args:
+        scene: Existing scene document with transcript fields populated.
+        ocr: OCR result for the same scene, or None if no OCR available.
+
+    Returns:
+        New SceneDocument with OCR fields populated.  If *ocr* is None or
+        the gated text is empty, OCR fields remain at their defaults.
+    """
+    if ocr is None:
+        return scene.model_copy()
+
+    gated = gate_ocr_text(ocr.ocr_text_raw)
+
+    return scene.model_copy(
+        update={
+            "ocr_text_raw": gated,
+            "ocr_char_count": len(gated),
+        },
+    )

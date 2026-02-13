@@ -25,6 +25,9 @@ venv/
 ENV/
 env/
 
+# Lockfiles (uv)
+uv.lock
+
 # Pytest
 .pytest_cache/
 .coverage
