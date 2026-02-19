@@ -7,6 +7,7 @@ insightface, pyannote, onnxruntime, ffmpeg).
 __version__ = "0.4.0"
 
 from heimdex_media_contracts import exports  # noqa: F401
+from heimdex_media_contracts import ingest  # noqa: F401
 from heimdex_media_contracts import ocr  # noqa: F401
 from heimdex_media_contracts import scenes  # noqa: F401
 from heimdex_media_contracts import shorts  # noqa: F401
