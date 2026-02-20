@@ -47,6 +47,39 @@ class TestIngestSceneDocument:
             assert doc.source_type == st
 
 
+    def test_scene_caption_defaults_empty(self):
+        doc = IngestSceneDocument(
+            scene_id="vid1_scene_0",
+            index=0,
+            start_ms=0,
+            end_ms=5000,
+        )
+        assert doc.scene_caption == ""
+
+    def test_scene_caption_roundtrip(self):
+        caption = "진행자가 카메라 앞에서 핑크색 립스틱을 시연하고 있습니다."
+        doc = IngestSceneDocument(
+            scene_id="vid1_scene_0",
+            index=0,
+            start_ms=0,
+            end_ms=5000,
+            scene_caption=caption,
+        )
+        assert doc.scene_caption == caption
+        rebuilt = IngestSceneDocument.model_validate(doc.model_dump())
+        assert rebuilt.scene_caption == caption
+
+    def test_scene_caption_max_length_rejected(self):
+        with pytest.raises(ValidationError, match="scene_caption"):
+            IngestSceneDocument(
+                scene_id="vid1_scene_0",
+                index=0,
+                start_ms=0,
+                end_ms=5000,
+                scene_caption="x" * 5_001,
+            )
+
+
 class TestIngestScenesRequest:
     def test_minimal_valid(self):
         req = IngestScenesRequest(

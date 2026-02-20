@@ -227,6 +227,32 @@ class TestSceneDocument:
         )
         assert doc.duration_ms == 0
 
+    def test_scene_caption_defaults_empty(self):
+        doc = SceneDocument(
+            scene_id="vid_scene_000",
+            video_id="vid",
+            index=0,
+            start_ms=0,
+            end_ms=5000,
+            keyframe_timestamp_ms=2500,
+        )
+        assert doc.scene_caption == ""
+
+    def test_scene_caption_roundtrip(self):
+        caption = "진행자가 카메라 앞에서 핑크색 립스틱을 시연하고 있습니다."
+        doc = SceneDocument(
+            scene_id="vid_scene_000",
+            video_id="vid",
+            index=0,
+            start_ms=0,
+            end_ms=5000,
+            keyframe_timestamp_ms=2500,
+            scene_caption=caption,
+        )
+        assert doc.scene_caption == caption
+        rebuilt = SceneDocument.model_validate(doc.model_dump())
+        assert rebuilt.scene_caption == caption
+
     def test_backward_compat_v1_data_without_new_fields(self):
         data = {
             "scene_id": "vid_scene_000",
@@ -240,6 +266,7 @@ class TestSceneDocument:
         assert doc.keyword_tags == []
         assert doc.product_tags == []
         assert doc.product_entities == []
+        assert doc.scene_caption == ""
 
 
 class TestSceneDetectionResult:

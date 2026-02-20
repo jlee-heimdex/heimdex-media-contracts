@@ -78,6 +78,10 @@ class SceneDocument(BaseModel):
     ocr_text_raw: str = ""
     ocr_char_count: int = 0
 
+    # Scene caption — added in v0.6.0.  Vision-generated natural language
+    # description of the scene's representative keyframe.
+    scene_caption: str = ""
+
     @property
     def duration_ms(self) -> int:
         """Scene duration in milliseconds (convenience for scoring)."""

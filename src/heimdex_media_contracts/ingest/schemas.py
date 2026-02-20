@@ -39,6 +39,12 @@ class IngestSceneDocument(BaseModel):
     product_entities: list[str] = Field(default_factory=list)
     ocr_text_raw: str = Field(default="", max_length=10_000)
     ocr_char_count: int = Field(default=0, ge=0)
+
+    # Scene caption — added in v0.6.0.  Vision-generated natural language
+    # description of the scene's representative keyframe.  Empty string when
+    # no caption has been produced yet (backward compatible).
+    scene_caption: str = Field(default="", max_length=5_000)
+
     source_type: SourceType = Field(default="gdrive")
     required_drive_nickname: str | None = Field(default=None)
     capture_time: datetime | None = Field(default=None)
