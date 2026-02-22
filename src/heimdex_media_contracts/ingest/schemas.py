@@ -9,7 +9,21 @@ SourceType = Literal["gdrive", "removable_disk", "local"]
 
 SOURCE_TYPE_VALUES: list[str] = ["gdrive", "removable_disk", "local"]
 
-_SCENE_ID_RE = re.compile(r"^.+_scene_\d+$")
+_SCENE_ID_RE = re.compile(r"^[^/\\\x00]+_scene_\d+$")
+_PATH_TRAVERSAL_CHARS = re.compile(r"[/\\\x00]")
+
+
+def _reject_path_traversal(value: str, field_name: str) -> str:
+    """Reject values containing path traversal characters (CWE-22)."""
+    if _PATH_TRAVERSAL_CHARS.search(value):
+        raise ValueError(
+            f"{field_name} must not contain '/', '\\', or null bytes, got: {value!r}"
+        )
+    if ".." in value:
+        raise ValueError(
+            f"{field_name} must not contain '..', got: {value!r}"
+        )
+    return value
 
 
 class IngestSceneDocument(BaseModel):
@@ -26,6 +40,7 @@ class IngestSceneDocument(BaseModel):
     @field_validator("scene_id")
     @classmethod
     def scene_id_format(cls, v: str) -> str:
+        _reject_path_traversal(v, "scene_id")
         if not _SCENE_ID_RE.match(v):
             raise ValueError(
                 f"scene_id must match '{{video_id}}_scene_{{index}}' pattern, got: {v!r}"
@@ -67,3 +82,8 @@ class IngestScenesRequest(BaseModel):
     total_duration_ms: int = Field(default=0, ge=0)
     source_path: str | None = Field(default=None, max_length=1000)
     scenes: list[IngestSceneDocument] = Field(...)
+
+    @field_validator("video_id")
+    @classmethod
+    def video_id_safe(cls, v: str) -> str:
+        return _reject_path_traversal(v, "video_id")

@@ -104,3 +104,49 @@ class TestIngestScenesRequest:
                 library_id=uuid4(),
                 scenes=[],
             )
+
+    @pytest.mark.parametrize("bad_id", [
+        "../../etc/passwd",
+        "video/../../secret",
+        "video\\..\\secret",
+        "hello\x00world",
+        "../parent",
+    ])
+    def test_video_id_path_traversal_rejected(self, bad_id):
+        with pytest.raises(ValidationError, match="video_id"):
+            IngestScenesRequest(
+                video_id=bad_id,
+                library_id=uuid4(),
+                scenes=[],
+            )
+
+    @pytest.mark.parametrize("safe_id", [
+        "gd_abc123def456",
+        "my-video-2026",
+        "video_with_underscores",
+        "한국어영상",
+    ])
+    def test_video_id_safe_values_accepted(self, safe_id):
+        req = IngestScenesRequest(
+            video_id=safe_id,
+            library_id=uuid4(),
+            scenes=[],
+        )
+        assert req.video_id == safe_id
+
+
+class TestSceneIdPathTraversal:
+    @pytest.mark.parametrize("bad_id", [
+        "../../etc_scene_0",
+        "vid/../../etc_scene_0",
+        "vid\\..\\etc_scene_0",
+        "hello\x00world_scene_0",
+    ])
+    def test_scene_id_path_traversal_rejected(self, bad_id):
+        with pytest.raises(ValidationError, match="scene_id"):
+            IngestSceneDocument(
+                scene_id=bad_id,
+                index=0,
+                start_ms=0,
+                end_ms=1000,
+            )
