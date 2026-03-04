@@ -47,6 +47,12 @@ def _get_text(seg: SegmentInput) -> str:
     return seg.text
 
 
+def _get_speaker_id(seg: SegmentInput) -> str | None:
+    if isinstance(seg, dict):
+        return seg.get("speaker_id")
+    return getattr(seg, "speaker_id", None)
+
+
 def assign_segments_to_scenes(
     scenes: Sequence[SceneBoundary],
     segments: Sequence[SegmentInput],
@@ -103,6 +109,56 @@ def aggregate_transcript(segments: Sequence[SegmentInput]) -> str:
     """
     texts = [_get_text(seg).strip() for seg in segments if _get_text(seg).strip()]
     return " ".join(texts)
+
+
+def aggregate_speaker_transcript(segments: Sequence[SegmentInput]) -> str:
+    """Build speaker-labelled transcript from diarized segments.
+
+    Merges consecutive segments by the same speaker into single lines.
+    Returns empty string when no segments have speaker labels.
+
+    Example output::
+
+        SPEAKER_00: 안녕하세요 오늘 라이브에 오신 걸 환영합니다
+        SPEAKER_01: 네 감사합니다 잘 부탁드립니다
+    """
+    if not segments:
+        return ""
+
+    has_any_speaker = any(_get_speaker_id(s) is not None for s in segments)
+    if not has_any_speaker:
+        return ""
+
+    lines: list[str] = []
+    current_speaker: str | None = None
+    current_texts: list[str] = []
+
+    for seg in segments:
+        speaker = _get_speaker_id(seg) or "UNKNOWN"
+        text = _get_text(seg).strip()
+        if not text:
+            continue
+        if speaker != current_speaker:
+            if current_texts and current_speaker is not None:
+                lines.append(f"{current_speaker}: {' '.join(current_texts)}")
+            current_speaker = speaker
+            current_texts = [text]
+        else:
+            current_texts.append(text)
+
+    if current_texts and current_speaker is not None:
+        lines.append(f"{current_speaker}: {' '.join(current_texts)}")
+
+    return "\n".join(lines)
+
+
+def count_distinct_speakers(segments: Sequence[SegmentInput]) -> int:
+    speakers: set[str] = set()
+    for seg in segments:
+        sid = _get_speaker_id(seg)
+        if sid is not None:
+            speakers.add(sid)
+    return len(speakers)
 
 
 def aggregate_scene_tags(segments: Sequence[TaggedSegment]) -> list[str]:

@@ -17,6 +17,7 @@ class SpeechSegment:
     end: float  # end time (seconds)
     text: str  # STT result text
     confidence: float = 0.0  # STT confidence
+    speaker_id: Optional[str] = None  # speaker label from diarization (e.g. "SPEAKER_00")
 
     @property
     def duration(self) -> float:
