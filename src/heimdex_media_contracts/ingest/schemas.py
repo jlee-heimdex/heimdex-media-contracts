@@ -61,6 +61,7 @@ class IngestSceneDocument(BaseModel):
     scene_caption: str = Field(default="", max_length=5_000)
 
     source_type: SourceType = Field(default="gdrive")
+    web_view_link: str | None = Field(default=None, max_length=2000)
     required_drive_nickname: str | None = Field(default=None)
     capture_time: datetime | None = Field(default=None)
 
@@ -81,6 +82,21 @@ class IngestScenesRequest(BaseModel):
     model_version: str = Field(default="")
     total_duration_ms: int = Field(default=0, ge=0)
     source_path: str | None = Field(default=None, max_length=1000)
+    web_view_link: str | None = Field(default=None, max_length=2000)
+    # Video metadata from ffprobe — used by export features (FCPXML).
+    # Optional for backward compatibility with older workers.
+    video_fps: float | None = Field(
+        default=None, ge=0,
+        description="Source video frame rate from ffprobe r_frame_rate",
+    )
+    video_width: int | None = Field(
+        default=None, ge=0,
+        description="Source video width in pixels",
+    )
+    video_height: int | None = Field(
+        default=None, ge=0,
+        description="Source video height in pixels",
+    )
     scenes: list[IngestSceneDocument] = Field(...)
 
     @field_validator("video_id")
