@@ -111,16 +111,27 @@ def aggregate_transcript(segments: Sequence[SegmentInput]) -> str:
     return " ".join(texts)
 
 
+def _format_timestamp(seconds: float) -> str:
+    total = int(seconds)
+    h = total // 3600
+    m = (total % 3600) // 60
+    s = total % 60
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
 def aggregate_speaker_transcript(segments: Sequence[SegmentInput]) -> str:
     """Build speaker-labelled transcript from diarized segments.
 
     Merges consecutive segments by the same speaker into single lines.
+    Each line includes the start timestamp of the first segment in the turn.
     Returns empty string when no segments have speaker labels.
 
     Example output::
 
-        SPEAKER_00: 안녕하세요 오늘 라이브에 오신 걸 환영합니다
-        SPEAKER_01: 네 감사합니다 잘 부탁드립니다
+        SPEAKER_00 [0:00]: 안녕하세요 오늘 라이브에 오신 걸 환영합니다
+        SPEAKER_01 [0:15]: 네 감사합니다 잘 부탁드립니다
     """
     if not segments:
         return ""
@@ -132,6 +143,7 @@ def aggregate_speaker_transcript(segments: Sequence[SegmentInput]) -> str:
     lines: list[str] = []
     current_speaker: str | None = None
     current_texts: list[str] = []
+    current_start: float = 0.0
 
     for seg in segments:
         speaker = _get_speaker_id(seg) or "UNKNOWN"
@@ -140,14 +152,17 @@ def aggregate_speaker_transcript(segments: Sequence[SegmentInput]) -> str:
             continue
         if speaker != current_speaker:
             if current_texts and current_speaker is not None:
-                lines.append(f"{current_speaker}: {' '.join(current_texts)}")
+                ts = _format_timestamp(current_start)
+                lines.append(f"{current_speaker} [{ts}]: {' '.join(current_texts)}")
             current_speaker = speaker
             current_texts = [text]
+            current_start = _get_start(seg)
         else:
             current_texts.append(text)
 
     if current_texts and current_speaker is not None:
-        lines.append(f"{current_speaker}: {' '.join(current_texts)}")
+        ts = _format_timestamp(current_start)
+        lines.append(f"{current_speaker} [{ts}]: {' '.join(current_texts)}")
 
     return "\n".join(lines)
 

@@ -32,7 +32,7 @@ class TestAggregateSpeakerTranscript:
     def test_single_speaker_single_segment(self):
         segments = [FakeSpeechSegment(0.0, 1.0, "hello", speaker_id="SPEAKER_00")]
         result = aggregate_speaker_transcript(segments)
-        assert result == "SPEAKER_00: hello"
+        assert result == "SPEAKER_00 [0:00]: hello"
 
     def test_single_speaker_multiple_segments_merged(self):
         segments = [
@@ -40,7 +40,7 @@ class TestAggregateSpeakerTranscript:
             FakeSpeechSegment(1.0, 2.0, "world", speaker_id="SPEAKER_00"),
         ]
         result = aggregate_speaker_transcript(segments)
-        assert result == "SPEAKER_00: hello world"
+        assert result == "SPEAKER_00 [0:00]: hello world"
 
     def test_two_speakers_alternating(self):
         segments = [
@@ -51,9 +51,9 @@ class TestAggregateSpeakerTranscript:
         result = aggregate_speaker_transcript(segments)
         lines = result.split("\n")
         assert len(lines) == 3
-        assert lines[0] == "SPEAKER_00: hello"
-        assert lines[1] == "SPEAKER_01: hi"
-        assert lines[2] == "SPEAKER_00: world"
+        assert lines[0] == "SPEAKER_00 [0:00]: hello"
+        assert lines[1] == "SPEAKER_01 [0:01]: hi"
+        assert lines[2] == "SPEAKER_00 [0:02]: world"
 
     def test_consecutive_same_speaker_merged_into_one_line(self):
         segments = [
@@ -62,7 +62,7 @@ class TestAggregateSpeakerTranscript:
             FakeSpeechSegment(2.0, 3.0, "friend", speaker_id="SPEAKER_00"),
         ]
         result = aggregate_speaker_transcript(segments)
-        assert result == "SPEAKER_00: hello my friend"
+        assert result == "SPEAKER_00 [0:00]: hello my friend"
 
     def test_unknown_fallback_when_speaker_id_none_but_others_have_speaker_id(self):
         segments = [
@@ -73,9 +73,9 @@ class TestAggregateSpeakerTranscript:
         result = aggregate_speaker_transcript(segments)
         lines = result.split("\n")
         assert len(lines) == 3
-        assert lines[0] == "SPEAKER_00: hello"
-        assert lines[1] == "UNKNOWN: unknown"
-        assert lines[2] == "SPEAKER_00: world"
+        assert lines[0] == "SPEAKER_00 [0:00]: hello"
+        assert lines[1] == "UNKNOWN [0:01]: unknown"
+        assert lines[2] == "SPEAKER_00 [0:02]: world"
 
     def test_empty_text_segments_skipped(self):
         segments = [
@@ -84,7 +84,7 @@ class TestAggregateSpeakerTranscript:
             FakeSpeechSegment(2.0, 3.0, "world", speaker_id="SPEAKER_00"),
         ]
         result = aggregate_speaker_transcript(segments)
-        assert result == "SPEAKER_00: hello world"
+        assert result == "SPEAKER_00 [0:00]: hello world"
 
     def test_whitespace_only_text_skipped(self):
         segments = [
@@ -93,7 +93,7 @@ class TestAggregateSpeakerTranscript:
             FakeSpeechSegment(2.0, 3.0, "world", speaker_id="SPEAKER_00"),
         ]
         result = aggregate_speaker_transcript(segments)
-        assert result == "SPEAKER_00: hello world"
+        assert result == "SPEAKER_00 [0:00]: hello world"
 
     def test_multiple_speakers_with_korean_text(self):
         segments = [
@@ -103,8 +103,20 @@ class TestAggregateSpeakerTranscript:
         result = aggregate_speaker_transcript(segments)
         lines = result.split("\n")
         assert len(lines) == 2
-        assert lines[0] == "SPEAKER_00: 안녕하세요"
-        assert lines[1] == "SPEAKER_01: 네 감사합니다"
+        assert lines[0] == "SPEAKER_00 [0:00]: 안녕하세요"
+        assert lines[1] == "SPEAKER_01 [0:01]: 네 감사합니다"
+
+    def test_timestamp_formatting_minutes_and_hours(self):
+        segments = [
+            FakeSpeechSegment(0.0, 60.0, "start", speaker_id="SPEAKER_00"),
+            FakeSpeechSegment(75.0, 80.0, "minute later", speaker_id="SPEAKER_01"),
+            FakeSpeechSegment(3661.0, 3665.0, "hour later", speaker_id="SPEAKER_00"),
+        ]
+        result = aggregate_speaker_transcript(segments)
+        lines = result.split("\n")
+        assert lines[0] == "SPEAKER_00 [0:00]: start"
+        assert lines[1] == "SPEAKER_01 [1:15]: minute later"
+        assert lines[2] == "SPEAKER_00 [1:01:01]: hour later"
 
 
 class TestCountDistinctSpeakers:
