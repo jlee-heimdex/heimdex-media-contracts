@@ -60,6 +60,31 @@ class IngestSceneDocument(BaseModel):
     # no caption has been produced yet (backward compatible).
     scene_caption: str = Field(default="", max_length=5_000)
 
+    # --- Content type (image search v0.7.0) ---
+    content_type: str = Field(
+        default="video",
+        description="Content type discriminator: 'video' or 'image'",
+    )
+    filename_text: str = Field(
+        default="",
+        max_length=1000,
+        description="Searchable filename tokens (for images: parsed season/SKU/color)",
+    )
+    image_width: int | None = Field(
+        default=None,
+        ge=0,
+        description="Image width in pixels (images only)",
+    )
+    image_height: int | None = Field(
+        default=None,
+        ge=0,
+        description="Image height in pixels (images only)",
+    )
+    image_orientation: str | None = Field(
+        default=None,
+        description="Image orientation: 'landscape', 'portrait', or 'square'",
+    )
+
     source_type: SourceType = Field(default="gdrive")
     web_view_link: str | None = Field(default=None, max_length=2000)
     required_drive_nickname: str | None = Field(default=None)
