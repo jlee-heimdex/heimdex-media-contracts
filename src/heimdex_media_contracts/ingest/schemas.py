@@ -5,9 +5,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-SourceType = Literal["gdrive", "removable_disk", "local"]
+SourceType = Literal["gdrive", "removable_disk", "local", "youtube"]
 
-SOURCE_TYPE_VALUES: list[str] = ["gdrive", "removable_disk", "local"]
+SOURCE_TYPE_VALUES: list[str] = ["gdrive", "removable_disk", "local", "youtube"]
 
 _SCENE_ID_RE = re.compile(r"^[^/\\\x00]+_scene_\d+$")
 _PATH_TRAVERSAL_CHARS = re.compile(r"[/\\\x00]")
