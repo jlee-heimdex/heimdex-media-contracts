@@ -98,23 +98,25 @@ def build_filter_graph(
         f"anullsrc=r=44100:cl=stereo,atrim=0:{total_duration_s}[silence]"
     )
 
-    # Scale each clip to fit within canvas (maintain aspect ratio, even dims)
+    # Scale each clip and shift PTS to its timeline position.
+    # setpts places each clip at the correct time on the output timeline.
+    # eof_action=pass makes the overlay disappear after the clip ends.
     for i, clip in enumerate(clips):
+        t_start_s = clip.timeline_start_ms / 1000.0
         parts.append(
             f"[{i}:v]scale={w}:{h}"
             f":force_original_aspect_ratio=decrease"
-            f":force_divisible_by=2[v{i}_scaled]"
+            f":force_divisible_by=2,"
+            f"setpts=PTS-STARTPTS+{t_start_s}/TB[v{i}_scaled]"
         )
 
     # Overlay each clip centered on the canvas
     prev_label = "base"
     for i, clip in enumerate(clips):
-        t_start = clip.timeline_start_ms / 1000.0
-        t_end = clip.timeline_end_ms / 1000.0
         out_label = f"canvas{i + 1}"
         parts.append(
             f"[{prev_label}][v{i}_scaled]overlay=x=(W-w)/2:y=(H-h)/2"
-            f":enable='between(t,{t_start},{t_end})'[{out_label}]"
+            f":eof_action=pass[{out_label}]"
         )
         prev_label = out_label
 

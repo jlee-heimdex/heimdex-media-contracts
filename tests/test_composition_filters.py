@@ -58,7 +58,8 @@ class TestBuildFilterGraph:
     def test_clip_timeline_position(self):
         clip = _make_clip(start_ms=10000, end_ms=30000, timeline_start_ms=10000)
         graph = build_filter_graph([clip], [], OutputSpec(), "/fonts")
-        assert "enable='between(t,10.0,30.0)'" in graph
+        assert "setpts=PTS-STARTPTS+10.0/TB" in graph
+        assert "eof_action=pass" in graph
 
     def test_canvas_size(self):
         graph = build_filter_graph([_make_clip()], [], OutputSpec(), "/fonts")
