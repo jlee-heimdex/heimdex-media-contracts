@@ -62,7 +62,7 @@ class TestBuildFilterGraph:
 
     def test_canvas_size(self):
         graph = build_filter_graph([_make_clip()], [], OutputSpec(), "/fonts")
-        assert "s=405x720" in graph
+        assert "s=406x720" in graph
 
     def test_multi_subtitle(self):
         sub1 = _make_subtitle("Text1", 0, 5000)

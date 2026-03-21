@@ -144,7 +144,7 @@ class TestSubtitleStyleSpec:
 class TestOutputSpec:
     def test_defaults(self):
         out = OutputSpec()
-        assert out.width == 405
+        assert out.width == 406
         assert out.height == 720
         assert out.fps == 30
         assert out.background_color == "#000000"

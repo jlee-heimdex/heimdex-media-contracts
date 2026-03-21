@@ -98,21 +98,22 @@ def build_filter_graph(
         f"anullsrc=r=44100:cl=stereo,atrim=0:{total_duration_s}[silence]"
     )
 
-    # Scale and pad each clip
+    # Scale each clip to fit within canvas (maintain aspect ratio, even dims)
     for i, clip in enumerate(clips):
         parts.append(
-            f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,"
-            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2[v{i}_scaled]"
+            f"[{i}:v]scale={w}:{h}"
+            f":force_original_aspect_ratio=decrease"
+            f":force_divisible_by=2[v{i}_scaled]"
         )
 
-    # Overlay each clip on the canvas
+    # Overlay each clip centered on the canvas
     prev_label = "base"
     for i, clip in enumerate(clips):
         t_start = clip.timeline_start_ms / 1000.0
         t_end = clip.timeline_end_ms / 1000.0
         out_label = f"canvas{i + 1}"
         parts.append(
-            f"[{prev_label}][v{i}_scaled]overlay=0:0"
+            f"[{prev_label}][v{i}_scaled]overlay=x=(W-w)/2:y=(H-h)/2"
             f":enable='between(t,{t_start},{t_end})'[{out_label}]"
         )
         prev_label = out_label

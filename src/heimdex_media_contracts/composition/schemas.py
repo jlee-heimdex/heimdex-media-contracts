@@ -3,7 +3,7 @@ from typing import Literal
 
 
 class OutputSpec(BaseModel):
-    width: int = Field(405, gt=0)
+    width: int = Field(406, gt=0)
     height: int = Field(720, gt=0)
     fps: int = Field(30, gt=0)
     format: str = "mp4"
