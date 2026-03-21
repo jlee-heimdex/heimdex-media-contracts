@@ -48,8 +48,23 @@ class SubtitleStyleSpec(BaseModel):
     line_height: float = Field(1.4, ge=0.5, le=3.0)
     letter_spacing: float = Field(0, ge=-5.0, le=20.0)
     text_align: Literal["left", "center", "right"] = "center"
-    position_x: float = Field(0.5, ge=0.0, le=1.0)
-    position_y: float = Field(0.85, ge=0.0, le=1.0)
+    position_x: float = Field(
+        0.5, ge=0.0, le=1.0,
+        description=(
+            "Horizontal position as a ratio (0.0=left edge, 1.0=right edge). "
+            "Origin is top-left corner. When text_align='center', this is ignored "
+            "and text is horizontally centered. When 'left', this is the left margin "
+            "ratio. When 'right', this is the right anchor ratio."
+        ),
+    )
+    position_y: float = Field(
+        0.85, ge=0.0, le=1.0,
+        description=(
+            "Vertical position as a ratio (0.0=top edge, 1.0=bottom edge). "
+            "Origin is top-left corner. The text top edge starts at height * position_y. "
+            "Example: 0.85 places text near the bottom (85% down from top)."
+        ),
+    )
     shadow_enabled: bool = True
     shadow_color: str = "#000000"
     shadow_offset_x: int = 2
