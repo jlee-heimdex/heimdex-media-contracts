@@ -1,176 +1,258 @@
-"""Pure string functions for ffmpeg filter graph building.
+"""Pure-function ffmpeg filter graph builder for composition rendering.
 
-No subprocess calls, no file I/O — same convention as edl.py.
+Takes a CompositionSpec and produces a filtergraph string that ffmpeg
+can consume via `-filter_complex`. No I/O, no subprocess calls.
+
+Filter graph structure:
+  1. Scale each input to output dimensions (with optional crop)
+  2. Create a black canvas at output dimensions
+  3. Overlay each clip onto the canvas in sequence
+  4. Concatenate audio streams
+  5. Optionally draw subtitle text on top
+
+Label conventions:
+  [s0], [s1], ...       — scaled video inputs
+  [a0], [a1], ...       — volume-adjusted audio inputs
+  [canvas0]             — initial black canvas
+  [canvas1], [canvas2]  — after overlaying each clip
+  [sub0], [sub1], ...   — after each subtitle drawtext
+  [final]               — after all subtitles (if any)
+  [aout]                — concatenated audio output
 """
 
 from __future__ import annotations
 
 from heimdex_media_contracts.composition.schemas import (
+    CompositionSpec,
     OutputSpec,
     SceneClipSpec,
     SubtitleSpec,
+    SubtitleStyleSpec,
 )
 
 
-def escape_drawtext(text: str) -> str:
-    """Escape special characters for ffmpeg drawtext filter.
-
-    Must escape: \\ : ' %  (Korean UTF-8 text passes through unchanged).
-    """
-    text = text.replace("\\", "\\\\")
-    text = text.replace(":", "\\:")
-    text = text.replace("'", "\\'")
-    text = text.replace("%", "%%")
-    return text
-
-
-def calc_text_position(
-    pos_x: float,
-    pos_y: float,
-    text_align: str,
-) -> tuple[str, str]:
-    """Convert normalized position (0-1) to ffmpeg x/y expressions.
-
-    center: x=(w-text_w)/2, left: x=w*pos_x, right: x=w*pos_x-text_w
-    """
-    if text_align == "center":
-        x_expr = "(w-text_w)/2"
-    elif text_align == "right":
-        x_expr = f"w*{pos_x}-text_w"
-    else:  # left
-        x_expr = f"w*{pos_x}"
-
-    y_expr = f"h*{pos_y}"
-    return x_expr, y_expr
-
-
-def resolve_font_path(
-    font_family: str,
-    font_weight: int,
-    font_dir: str,
-) -> str:
-    """Resolve font file path from family + weight.
-
-    font_weight >= 600 -> Bold variant, < 600 -> Regular variant.
-    Returns: {font_dir}/{family}-{Bold|Regular}.ttf
-    """
-    variant = "Bold" if font_weight >= 600 else "Regular"
-    family_clean = font_family.replace(" ", "")
-    return f"{font_dir}/{family_clean}-{variant}.ttf"
-
-
 def build_filter_graph(
+    *,
     clips: list[SceneClipSpec],
     subtitles: list[SubtitleSpec],
     output: OutputSpec,
     font_dir: str,
 ) -> str:
-    """Build ffmpeg filter_complex string using timeline-based overlay approach.
+    """Build a complete ffmpeg filter_complex string.
 
-    Creates a solid-color canvas for the full output duration and overlays
-    each clip at its timeline position. Gaps show background color.
+    Args:
+        clips: Ordered scene clips (each maps to an ffmpeg input by index).
+        subtitles: Text overlays with timing and styling.
+        output: Output dimensions and background color.
+        font_dir: Absolute path to font directory on the render machine.
 
-    ffmpeg drawtext limitations applied here:
-    - shadow_blur: ignored (hard shadow only via shadowx/shadowy)
-    - letter_spacing: not supported by drawtext, ignored
-    - line_height: mapped to line_spacing = font_size * (line_height - 1.0)
-    - font_weight: >= 600 selects Bold variant, < 600 selects Regular
+    Returns:
+        A single filtergraph string for `-filter_complex`.
     """
-    from heimdex_media_contracts.composition.schemas import CompositionSpec
-
-    # Calculate total duration from clips and subtitles
-    clip_end = max((c.timeline_end_ms for c in clips), default=0)
-    sub_end = max((s.end_ms for s in subtitles), default=0)
-    total_duration_ms = max(clip_end, sub_end)
-    total_duration_s = total_duration_ms / 1000.0
-
-    w, h = output.width, output.height
     parts: list[str] = []
 
-    # Base canvas
+    # 1. Scale + crop each input to output dimensions
+    for i, clip in enumerate(clips):
+        parts.append(_build_scale_filter(i, clip, output))
+        parts.append(_build_audio_filter(i, clip))
+
+    # 2. Create black canvas
     parts.append(
-        f"color=c={output.background_color}:s={w}x{h}"
-        f":d={total_duration_s}:r={output.fps}[base]"
+        f"color=c={output.background_color.replace('#', '0x')}"
+        f":s={output.width}x{output.height}"
+        f":d={_ms_to_s(clips[-1].timeline_start_ms + clips[-1].duration_ms)}"
+        f":r={output.fps}"
+        f"[canvas0]"
     )
 
-    # Silent audio track
-    parts.append(
-        f"anullsrc=r=44100:cl=stereo,atrim=0:{total_duration_s}[silence]"
-    )
-
-    # Scale each clip and shift PTS to its timeline position.
-    # setpts places each clip at the correct time on the output timeline.
-    # eof_action=pass makes the overlay disappear after the clip ends.
-    for i, clip in enumerate(clips):
-        t_start_s = clip.timeline_start_ms / 1000.0
+    # 3. Overlay each clip onto canvas at its timeline position
+    for i in range(len(clips)):
+        canvas_in = f"canvas{i}"
+        canvas_out = f"canvas{i + 1}"
+        enable_start = _ms_to_s(clips[i].timeline_start_ms)
+        enable_end = _ms_to_s(clips[i].timeline_start_ms + clips[i].duration_ms)
         parts.append(
-            f"[{i}:v]scale={w}:{h}"
-            f":force_original_aspect_ratio=decrease"
-            f":force_divisible_by=2,"
-            f"setpts=PTS-STARTPTS+{t_start_s}/TB[v{i}_scaled]"
+            f"[{canvas_in}][s{i}]overlay=0:0"
+            f":enable='between(t,{enable_start},{enable_end})'"
+            f"[{canvas_out}]"
         )
 
-    # Overlay each clip centered on the canvas
-    prev_label = "base"
-    for i, clip in enumerate(clips):
-        out_label = f"canvas{i + 1}"
-        parts.append(
-            f"[{prev_label}][v{i}_scaled]overlay=x=(W-w)/2:y=(H-h)/2"
-            f":eof_action=pass[{out_label}]"
-        )
-        prev_label = out_label
+    # 4. Concatenate audio
+    n = len(clips)
+    audio_inputs = "".join(f"[a{i}]" for i in range(n))
+    parts.append(f"{audio_inputs}concat=n={n}:v=0:a=1[aout]")
 
-    # Audio: delay and mix each clip's audio
-    if clips:
-        for i, clip in enumerate(clips):
-            delay_ms = clip.timeline_start_ms
-            parts.append(f"[{i}:a]adelay={delay_ms}|{delay_ms}[a{i}_delayed]")
-
-        audio_inputs = "".join(f"[a{i}_delayed]" for i in range(len(clips)))
-        parts.append(
-            f"[silence]{audio_inputs}amix=inputs={len(clips) + 1}"
-            f":duration=first[aout]"
-        )
-
-    # Subtitles as drawtext filters
-    current_label = prev_label
-    for j, sub in enumerate(subtitles):
-        style = sub.style
-        font_path = resolve_font_path(style.font_family, style.font_weight, font_dir)
-        x_expr, y_expr = calc_text_position(
-            style.position_x, style.position_y, style.text_align
-        )
-        escaped_text = escape_drawtext(sub.text)
-        t_start = sub.start_ms / 1000.0
-        t_end = sub.end_ms / 1000.0
-
-        line_spacing = int(style.font_size_px * (style.line_height - 1.0))
-
-        dt_params = [
-            f"text='{escaped_text}'",
-            f"fontfile={font_path}",
-            f"fontsize={style.font_size_px}",
-            f"fontcolor={style.font_color}",
-            f"x={x_expr}",
-            f"y={y_expr}",
-            f"line_spacing={line_spacing}",
-            f"enable='between(t,{t_start},{t_end})'",
-        ]
-
-        if style.shadow_enabled:
-            dt_params.append(f"shadowcolor={style.shadow_color}")
-            dt_params.append(f"shadowx={style.shadow_offset_x}")
-            dt_params.append(f"shadowy={style.shadow_offset_y}")
-
-        if style.background_enabled and style.background_color:
-            dt_params.append("box=1")
-            dt_params.append(f"boxcolor={style.background_color}")
-            dt_params.append(f"boxborderw={style.background_padding}")
-
-        out_label = f"vt{j + 1}" if j < len(subtitles) - 1 else "final"
-        parts.append(
-            f"[{current_label}]drawtext={':'.join(dt_params)}[{out_label}]"
-        )
-        current_label = out_label
+    # 5. Subtitle drawtext filters
+    if subtitles:
+        last_video_label = f"canvas{n}"
+        for j, sub in enumerate(subtitles):
+            label_in = last_video_label
+            label_out = f"sub{j}" if j < len(subtitles) - 1 else "final"
+            parts.append(
+                _build_drawtext_filter(
+                    label_in=label_in,
+                    label_out=label_out,
+                    subtitle=sub,
+                    output=output,
+                    font_dir=font_dir,
+                )
+            )
+            last_video_label = label_out
 
     return ";\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Individual filter builders
+# ---------------------------------------------------------------------------
+
+def _build_scale_filter(index: int, clip: SceneClipSpec, output: OutputSpec) -> str:
+    """Scale (and optionally crop) input to output dimensions."""
+    if clip.has_crop:
+        # Crop first (in source pixel space), then scale to output
+        return (
+            f"[{index}:v]crop="
+            f"iw*{clip.crop_w}:ih*{clip.crop_h}"
+            f":iw*{clip.crop_x}:ih*{clip.crop_y},"
+            f"scale={output.width}:{output.height}:force_original_aspect_ratio=decrease,"
+            f"pad={output.width}:{output.height}:(ow-iw)/2:(oh-ih)/2"
+            f":color={output.background_color.replace('#', '0x')}"
+            f"[s{index}]"
+        )
+    return (
+        f"[{index}:v]scale={output.width}:{output.height}"
+        f":force_original_aspect_ratio=decrease,"
+        f"pad={output.width}:{output.height}:(ow-iw)/2:(oh-ih)/2"
+        f":color={output.background_color.replace('#', '0x')}"
+        f"[s{index}]"
+    )
+
+
+def _build_audio_filter(index: int, clip: SceneClipSpec) -> str:
+    """Volume adjustment for a clip's audio."""
+    return f"[{index}:a]volume={clip.volume}[a{index}]"
+
+
+def _build_drawtext_filter(
+    *,
+    label_in: str,
+    label_out: str,
+    subtitle: SubtitleSpec,
+    output: OutputSpec,
+    font_dir: str,
+) -> str:
+    """Build a drawtext filter for a single subtitle."""
+    style = subtitle.style
+    escaped_text = _escape_ffmpeg_text(subtitle.text)
+
+    # Resolve font file path
+    font_file = _resolve_font_path(style.font_family, style.font_weight, font_dir)
+
+    # Position: convert normalized coordinates to pixel expressions
+    x_expr = _position_to_ffmpeg_x(style.position_x, style.text_align)
+    y_expr = f"h*{style.position_y}-th/2"
+
+    # Enable window
+    enable_start = _ms_to_s(subtitle.start_ms)
+    enable_end = _ms_to_s(subtitle.end_ms)
+
+    # Line spacing from line_height
+    line_spacing = int(style.font_size_px * (style.line_height - 1.0))
+
+    parts = [
+        f"fontfile='{font_file}'",
+        f"text='{escaped_text}'",
+        f"fontsize={style.font_size_px}",
+        f"fontcolor={style.font_color}",
+        f"x={x_expr}",
+        f"y={y_expr}",
+        f"line_spacing={line_spacing}",
+        f"enable='between(t,{enable_start},{enable_end})'",
+    ]
+
+    # Background box
+    if style.has_background:
+        parts.append(f"box=1")
+        parts.append(f"boxcolor={style.background_color}@{style.background_opacity}")
+        parts.append(f"boxborderw={style.background_padding}")
+
+    # Border/stroke
+    if style.has_stroke:
+        parts.append(f"borderw={style.stroke_width}")
+        parts.append(f"bordercolor={style.stroke_color}")
+
+    # Shadow
+    if style.has_shadow:
+        parts.append(f"shadowcolor={style.shadow_color}")
+        parts.append(f"shadowx={style.shadow_offset_x}")
+        parts.append(f"shadowy={style.shadow_offset_y}")
+
+    drawtext_args = ":".join(parts)
+    return f"[{label_in}]drawtext={drawtext_args}[{label_out}]"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _ms_to_s(ms: int) -> str:
+    """Convert milliseconds to seconds string with 3 decimal places."""
+    return f"{ms / 1000:.3f}"
+
+
+def _escape_ffmpeg_text(text: str) -> str:
+    """Escape special characters for ffmpeg drawtext filter.
+
+    FFmpeg drawtext requires escaping: ' \\ : %
+    Also handle newlines.
+    """
+    text = text.replace("\\", "\\\\\\\\")
+    text = text.replace("'", "'\\\\\\''")
+    text = text.replace(":", "\\\\:")
+    text = text.replace("%", "%%")
+    text = text.replace("\n", "\\n")
+    return text
+
+
+def _resolve_font_path(family: str, weight: int, font_dir: str) -> str:
+    """Map a font family name + weight to a font file path.
+
+    Supports common Korean fonts used in Heimdex shorts.
+    Falls back to regular weight if bold variant not found.
+    """
+    font_dir = font_dir.rstrip("/")
+
+    weight_suffix = "Bold" if weight >= 600 else "Regular"
+
+    font_map: dict[str, dict[str, str]] = {
+        "Pretendard": {
+            "Bold": f"{font_dir}/Pretendard-Bold.otf",
+            "Regular": f"{font_dir}/Pretendard-Regular.otf",
+        },
+        "Noto Sans KR": {
+            "Bold": f"{font_dir}/NotoSansKR-Bold.otf",
+            "Regular": f"{font_dir}/NotoSansKR-Regular.otf",
+        },
+        "Noto Sans": {
+            "Bold": f"{font_dir}/NotoSans-Bold.ttf",
+            "Regular": f"{font_dir}/NotoSans-Regular.ttf",
+        },
+    }
+
+    family_fonts = font_map.get(family)
+    if family_fonts:
+        return family_fonts.get(weight_suffix, family_fonts["Regular"])
+
+    # Fallback: construct path from family name
+    safe_name = family.replace(" ", "")
+    return f"{font_dir}/{safe_name}-{weight_suffix}.otf"
+
+
+def _position_to_ffmpeg_x(position_x: float, text_align: str) -> str:
+    """Convert normalized x position + alignment to ffmpeg x expression."""
+    if text_align == "center":
+        return f"w*{position_x}-tw/2"
+    if text_align == "right":
+        return f"w*{position_x}-tw"
+    # left
+    return f"w*{position_x}"

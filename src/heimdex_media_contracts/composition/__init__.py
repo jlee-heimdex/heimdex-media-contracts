@@ -1,17 +1,17 @@
-"""Composition specs and pure ffmpeg filter graph builders."""
+"""Video composition schemas and filter graph builder.
 
-from heimdex_media_contracts.composition.filters import (
-    build_filter_graph,
-    calc_text_position,
-    escape_drawtext,
-    resolve_font_path,
-)
+The CompositionSpec is the single contract between the editor UI,
+the API layer, and the ffmpeg render pipeline.
+"""
+
+from heimdex_media_contracts.composition.filters import build_filter_graph
 from heimdex_media_contracts.composition.schemas import (
     CompositionSpec,
     OutputSpec,
     SceneClipSpec,
     SubtitleSpec,
     SubtitleStyleSpec,
+    TransitionSpec,
 )
 
 __all__ = [
@@ -20,8 +20,6 @@ __all__ = [
     "SceneClipSpec",
     "SubtitleSpec",
     "SubtitleStyleSpec",
+    "TransitionSpec",
     "build_filter_graph",
-    "calc_text_position",
-    "escape_drawtext",
-    "resolve_font_path",
 ]
