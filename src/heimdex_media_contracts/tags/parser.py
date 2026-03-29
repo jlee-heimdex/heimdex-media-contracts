@@ -70,12 +70,27 @@ def parse_vlm_tag_output(raw_text: str) -> VLMTagResult:
     product_raw = _extract_line(_PRODUCT_PREFIX, text)
     entity_raw = _extract_line(_ENTITY_PREFIX, text)
 
+    # If no "설명:" prefix found, the VLM may have started directly with
+    # the caption text (prompt ended with "설명:" so output continues from there).
+    # Use the first line before any tag prefix as the caption.
+    if not caption:
+        lines = text.split("\n")
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if (_KEYWORD_PREFIX.match(stripped) or _PRODUCT_PREFIX.match(stripped)
+                    or _ENTITY_PREFIX.match(stripped)):
+                break
+            caption = stripped
+            break
+
     keyword_tags = _validate_tags(_parse_comma_list(keyword_raw), VALID_KEYWORD_TAGS)
     product_tags = _validate_tags(_parse_comma_list(product_raw), VALID_PRODUCT_TAGS)
     product_entities = _clean_entities(_parse_comma_list(entity_raw))
 
     # If we got at least a caption, consider it a successful parse
-    if caption:
+    if caption and (keyword_tags or product_tags or product_entities):
         return VLMTagResult(
             caption=caption,
             keyword_tags=keyword_tags,
@@ -83,12 +98,21 @@ def parse_vlm_tag_output(raw_text: str) -> VLMTagResult:
             product_entities=product_entities,
             parse_success=True,
         )
-
     # --- Strategy 2: regex fallback ---
-    # VLM may have produced tags without the expected prefix format.
-    # Try to find any valid tag keys mentioned anywhere in the text.
-    keyword_tags = _scan_for_tags(text, VALID_KEYWORD_TAGS)
-    product_tags = _scan_for_tags(text, VALID_PRODUCT_TAGS)
+    # If no structured tags found, scan for any valid tag keys in the text.
+    if not keyword_tags and not product_tags:
+        keyword_tags = _scan_for_tags(text, VALID_KEYWORD_TAGS)
+        product_tags = _scan_for_tags(text, VALID_PRODUCT_TAGS)
+
+    # Return with whatever we found
+    if caption:
+        return VLMTagResult(
+            caption=caption,
+            keyword_tags=keyword_tags,
+            product_tags=product_tags,
+            product_entities=product_entities,
+            parse_success=bool(keyword_tags or product_tags or product_entities),
+        )
 
     if keyword_tags or product_tags:
         # Use the whole text as caption (best effort)

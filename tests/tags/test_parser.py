@@ -57,6 +57,30 @@ class TestCleanVLMOutput:
         assert result.keyword_tags == ["price_announce", "discount_offer"]
 
 
+class TestNoPrefixOutput:
+    """VLM output when prompt ends with '설명:' and model continues directly."""
+
+    def test_caption_without_prefix(self):
+        text = (
+            "호스트가 제모기를 들고 기능을 설명하고 있다\n"
+            "콘텐츠태그: product_demo, tutorial\n"
+            "상품태그: beauty_device\n"
+            "상품명: 라피타 제모기"
+        )
+        result = parse_vlm_tag_output(text)
+        assert result.parse_success is True
+        assert result.caption == "호스트가 제모기를 들고 기능을 설명하고 있다"
+        assert result.keyword_tags == ["product_demo", "tutorial"]
+        assert result.product_tags == ["beauty_device"]
+        assert result.product_entities == ["라피타 제모기"]
+
+    def test_caption_only_no_tags(self):
+        text = "호스트가 카메라를 보며 인사하고 있다"
+        result = parse_vlm_tag_output(text)
+        assert result.caption == "호스트가 카메라를 보며 인사하고 있다"
+        assert result.keyword_tags == []
+
+
 class TestMalformedOutput:
     """VLM produces imperfect output."""
 
@@ -75,7 +99,7 @@ class TestMalformedOutput:
     def test_missing_tag_lines(self):
         text = "설명: 호스트가 이야기하고 있다"
         result = parse_vlm_tag_output(text)
-        assert result.parse_success is True
+        assert result.parse_success is False  # no tags = not a successful structured parse
         assert result.caption == "호스트가 이야기하고 있다"
         assert result.keyword_tags == []
         assert result.product_tags == []
@@ -177,7 +201,7 @@ class TestRegexFallback:
     def test_tags_mentioned_in_text(self):
         text = "This scene shows a product_demo with skincare items and a swatch_test"
         result = parse_vlm_tag_output(text)
-        assert result.parse_success is False
+        assert result.parse_success is True  # tags found via regex scan
         assert "product_demo" in result.keyword_tags
         assert "swatch_test" in result.keyword_tags
         assert "skincare" in result.product_tags
