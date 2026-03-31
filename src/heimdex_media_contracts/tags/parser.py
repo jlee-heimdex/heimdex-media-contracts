@@ -17,17 +17,22 @@ import re
 from dataclasses import dataclass, field
 
 from heimdex_media_contracts.tags.vocabulary import (
+    ALL_TAG_LABELS,
     VALID_KEYWORD_TAGS,
     VALID_PRODUCT_TAGS,
 )
 
 _MAX_ENTITIES = 5
+_MAX_AI_TAGS = 7
+_AI_TAG_MIN_LEN = 2
+_AI_TAG_MAX_LEN = 15
 
 # Line prefixes (Korean keys from the VLM prompt)
 _CAPTION_PREFIX = re.compile(r"^설명\s*[:：]\s*", re.MULTILINE)
 _KEYWORD_PREFIX = re.compile(r"^콘텐츠태그\s*[:：]\s*", re.MULTILINE)
 _PRODUCT_PREFIX = re.compile(r"^상품태그\s*[:：]\s*", re.MULTILINE)
 _ENTITY_PREFIX = re.compile(r"^상품명\s*[:：]\s*", re.MULTILINE)
+_AI_TAG_PREFIX = re.compile(r"^AI태그\s*[:：]\s*", re.MULTILINE)
 
 
 @dataclass
@@ -38,6 +43,7 @@ class VLMTagResult:
     keyword_tags: list[str] = field(default_factory=list)
     product_tags: list[str] = field(default_factory=list)
     product_entities: list[str] = field(default_factory=list)
+    ai_tags: list[str] = field(default_factory=list)
     parse_success: bool = False
 
 
@@ -80,14 +86,17 @@ def parse_vlm_tag_output(raw_text: str) -> VLMTagResult:
             if not stripped:
                 continue
             if (_KEYWORD_PREFIX.match(stripped) or _PRODUCT_PREFIX.match(stripped)
-                    or _ENTITY_PREFIX.match(stripped)):
+                    or _ENTITY_PREFIX.match(stripped) or _AI_TAG_PREFIX.match(stripped)):
                 break
             caption = stripped
             break
 
+    ai_tag_raw = _extract_line(_AI_TAG_PREFIX, text)
+
     keyword_tags = _validate_tags(_parse_comma_list(keyword_raw), VALID_KEYWORD_TAGS)
     product_tags = _validate_tags(_parse_comma_list(product_raw), VALID_PRODUCT_TAGS)
     product_entities = _clean_entities(_parse_comma_list(entity_raw))
+    ai_tags = _clean_ai_tags(_parse_comma_list(ai_tag_raw))
 
     # If we got at least a caption, consider it a successful parse
     if caption and (keyword_tags or product_tags or product_entities):
@@ -96,6 +105,7 @@ def parse_vlm_tag_output(raw_text: str) -> VLMTagResult:
             keyword_tags=keyword_tags,
             product_tags=product_tags,
             product_entities=product_entities,
+            ai_tags=ai_tags,
             parse_success=True,
         )
     # --- Strategy 2: regex fallback ---
@@ -111,6 +121,7 @@ def parse_vlm_tag_output(raw_text: str) -> VLMTagResult:
             keyword_tags=keyword_tags,
             product_tags=product_tags,
             product_entities=product_entities,
+            ai_tags=ai_tags,
             parse_success=bool(keyword_tags or product_tags or product_entities),
         )
 
@@ -122,6 +133,7 @@ def parse_vlm_tag_output(raw_text: str) -> VLMTagResult:
             keyword_tags=keyword_tags,
             product_tags=product_tags,
             product_entities=[],
+            ai_tags=ai_tags,
             parse_success=False,  # partial parse
         )
 
@@ -133,6 +145,7 @@ def parse_vlm_tag_output(raw_text: str) -> VLMTagResult:
         keyword_tags=[],
         product_tags=[],
         product_entities=[],
+        ai_tags=[],
         parse_success=False,
     )
 
@@ -185,6 +198,44 @@ def _clean_entities(raw_entities: list[str]) -> list[str]:
             seen.add(cleaned)
             result.append(cleaned)
         if len(result) >= _MAX_ENTITIES:
+            break
+    return result
+
+
+def _clean_ai_tags(raw_tags: list[str]) -> list[str]:
+    """Clean, validate, and deduplicate free-form AI tags.
+
+    Guardrails:
+      - Strip whitespace
+      - Drop empty strings and "없음"/"none"
+      - Enforce 2-15 character length per tag
+      - Deduplicate (case-preserving, normalized comparison)
+      - Drop tags that match controlled vocabulary Korean display names
+      - Cap at 7 tags max
+    """
+    if not raw_tags:
+        return []
+
+    # Build set of Korean display names from controlled vocabulary for overlap check
+    vocab_display_names = {v.lower() for v in ALL_TAG_LABELS.values()}
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for tag in raw_tags:
+        cleaned = tag.strip()
+        if not cleaned or cleaned == "없음" or cleaned.lower() == "none":
+            continue
+        if len(cleaned) < _AI_TAG_MIN_LEN or len(cleaned) > _AI_TAG_MAX_LEN:
+            continue
+        normalized = cleaned.lower()
+        if normalized in seen:
+            continue
+        # Drop if it exactly matches a controlled vocabulary display name
+        if normalized in vocab_display_names:
+            continue
+        seen.add(normalized)
+        result.append(cleaned)
+        if len(result) >= _MAX_AI_TAGS:
             break
     return result
 

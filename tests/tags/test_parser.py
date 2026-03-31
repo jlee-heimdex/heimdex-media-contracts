@@ -215,6 +215,109 @@ class TestRegexFallback:
         assert result.caption == "호스트가 카메라를 보며 인사하고 있다"
 
 
+class TestAITags:
+    """Free-form AI tag parsing and quality guardrails."""
+
+    def test_ai_tags_extracted(self):
+        text = (
+            "설명: 호스트가 수분크림을 손등에 발라 텍스처를 보여주고 있다\n"
+            "콘텐츠태그: swatch_test, texture_show\n"
+            "상품태그: skincare\n"
+            "상품명: 수분크림\n"
+            "AI태그: 수분크림, 텍스처 시연, 손등 발색, 촉촉한 제형"
+        )
+        result = parse_vlm_tag_output(text)
+        assert result.parse_success is True
+        assert result.ai_tags == ["수분크림", "텍스처 시연", "손등 발색", "촉촉한 제형"]
+
+    def test_ai_tags_empty_when_missing(self):
+        """Backward compat: old VLM output without AI태그 line."""
+        text = (
+            "설명: 호스트가 제품을 들고 있다\n"
+            "콘텐츠태그: product_demo\n"
+            "상품태그: skincare\n"
+            "상품명: 세럼"
+        )
+        result = parse_vlm_tag_output(text)
+        assert result.ai_tags == []
+
+    def test_ai_tags_max_7(self):
+        tags = ", ".join([f"태그{i}" for i in range(10)])
+        text = f"설명: 캡션\n콘텐츠태그: product_demo\n상품태그: skincare\nAI태그: {tags}"
+        result = parse_vlm_tag_output(text)
+        assert len(result.ai_tags) == 7
+
+    def test_ai_tags_length_filter(self):
+        text = (
+            "설명: 캡션\n"
+            "콘텐츠태그: product_demo\n"
+            "AI태그: 짧, 적절한태그, 이것은너무긴태그라서열다섯글자를초과합니다"
+        )
+        result = parse_vlm_tag_output(text)
+        # "짧" is 1 char (< 2 min), long tag is > 15 chars
+        assert result.ai_tags == ["적절한태그"]
+
+    def test_ai_tags_dedup(self):
+        text = (
+            "설명: 캡션\n"
+            "콘텐츠태그: product_demo\n"
+            "AI태그: 수분크림, 수분크림, 보습효과"
+        )
+        result = parse_vlm_tag_output(text)
+        assert result.ai_tags == ["수분크림", "보습효과"]
+
+    def test_ai_tags_dedup_case_preserving(self):
+        text = (
+            "설명: 캡션\n"
+            "콘텐츠태그: product_demo\n"
+            "AI태그: BB크림, bb크림, CC크림"
+        )
+        result = parse_vlm_tag_output(text)
+        assert result.ai_tags == ["BB크림", "CC크림"]
+
+    def test_ai_tags_vocab_overlap_removed(self):
+        """Tags matching controlled vocabulary Korean display names are dropped."""
+        text = (
+            "설명: 캡션\n"
+            "콘텐츠태그: product_demo\n"
+            "상품태그: skincare\n"
+            "AI태그: 스킨케어, 제품 시연, 수분감, 촉촉한 피부"
+        )
+        result = parse_vlm_tag_output(text)
+        # "스킨케어" matches skincare display name, "제품 시연" matches product_demo display name
+        assert "스킨케어" not in result.ai_tags
+        assert "제품 시연" not in result.ai_tags
+        assert "수분감" in result.ai_tags
+        assert "촉촉한 피부" in result.ai_tags
+
+    def test_ai_tags_none_filtered(self):
+        text = (
+            "설명: 캡션\n"
+            "콘텐츠태그: qna\n"
+            "AI태그: 없음"
+        )
+        result = parse_vlm_tag_output(text)
+        assert result.ai_tags == []
+
+    def test_ai_tags_with_fullwidth_colon(self):
+        text = (
+            "설명: 캡션\n"
+            "콘텐츠태그: product_demo\n"
+            "AI태그： 보습크림, 피부관리"
+        )
+        result = parse_vlm_tag_output(text)
+        assert result.ai_tags == ["보습크림", "피부관리"]
+
+    def test_ai_tags_whitespace_stripped(self):
+        text = (
+            "설명: 캡션\n"
+            "콘텐츠태그: product_demo\n"
+            "AI태그:  수분크림 ,  피부관리  ,  보습  "
+        )
+        result = parse_vlm_tag_output(text)
+        assert result.ai_tags == ["수분크림", "피부관리", "보습"]
+
+
 class TestEdgeCases:
     def test_empty_string(self):
         result = parse_vlm_tag_output("")

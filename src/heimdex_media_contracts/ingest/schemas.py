@@ -52,6 +52,7 @@ class IngestSceneDocument(BaseModel):
     keyword_tags: list[str] = Field(default_factory=list)
     product_tags: list[str] = Field(default_factory=list)
     product_entities: list[str] = Field(default_factory=list)
+    ai_tags: list[str] = Field(default_factory=list)
     ocr_text_raw: str = Field(default="", max_length=10_000)
     ocr_char_count: int = Field(default=0, ge=0)
 

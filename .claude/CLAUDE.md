@@ -41,7 +41,10 @@ src/heimdex_media_contracts/
 │   ├── splitting.py   # SplitSignal, SplitConfig (speech-aware split contracts)
 │   ├── combiner.py    # combine_signals() — merges multiple SplitSignal lists
 │   └── presets.py     # default/fine/coarse/visual_only presets (Korean labels), resolve_config()
-├── ingest/            # Cloud ingest contract models (IngestScenesRequest)
+├── tags/
+│   ├── vocabulary.py  # Controlled tag vocabulary (27 keyword + 16 product tags, English keys + Korean display)
+│   └── parser.py      # parse_vlm_tag_output() → VLMTagResult (caption, keyword_tags, product_tags, product_entities, ai_tags)
+├── ingest/            # Cloud ingest contract models (IngestScenesRequest, IngestSceneDocument with ai_tags)
 ├── ocr/               # OCR result schemas
 ├── exports/           # Export format schemas
 └── shorts/            # Short-form video schemas
