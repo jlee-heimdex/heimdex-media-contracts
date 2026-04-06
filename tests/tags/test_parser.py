@@ -11,17 +11,17 @@ class TestCleanVLMOutput:
 
     def test_full_output(self):
         text = (
-            "설명: 호스트가 수분크림을 손등에 발라 텍스처를 보여주고 있다\n"
+            "설명: 호스트가 운동화를 들고 디자인을 보여주고 있다\n"
             "콘텐츠태그: swatch_test, texture_show, product_demo\n"
-            "상품태그: skincare\n"
-            "상품명: 수분크림, 히알루론산 세럼"
+            "상품태그: shoes\n"
+            "상품명: 에어맥스, 나이키 러닝화"
         )
         result = parse_vlm_tag_output(text)
         assert result.parse_success is True
-        assert result.caption == "호스트가 수분크림을 손등에 발라 텍스처를 보여주고 있다"
+        assert result.caption == "호스트가 운동화를 들고 디자인을 보여주고 있다"
         assert result.keyword_tags == ["swatch_test", "texture_show", "product_demo"]
-        assert result.product_tags == ["skincare"]
-        assert result.product_entities == ["수분크림", "히알루론산 세럼"]
+        assert result.product_tags == ["shoes"]
+        assert result.product_entities == ["에어맥스", "나이키 러닝화"]
 
     def test_multiple_product_tags(self):
         text = (
@@ -220,15 +220,15 @@ class TestAITags:
 
     def test_ai_tags_extracted(self):
         text = (
-            "설명: 호스트가 수분크림을 손등에 발라 텍스처를 보여주고 있다\n"
-            "콘텐츠태그: swatch_test, texture_show\n"
-            "상품태그: skincare\n"
-            "상품명: 수분크림\n"
-            "AI태그: 수분크림, 텍스처 시연, 손등 발색, 촉촉한 제형"
+            "설명: 호스트가 가방을 들고 수납공간을 보여주고 있다\n"
+            "콘텐츠태그: closeup_detail, product_demo\n"
+            "상품태그: bag\n"
+            "상품명: 캔버스 토트백\n"
+            "AI태그: 캔버스백, 수납공간, 데일리백, 숄더스트랩"
         )
         result = parse_vlm_tag_output(text)
         assert result.parse_success is True
-        assert result.ai_tags == ["수분크림", "텍스처 시연", "손등 발색", "촉촉한 제형"]
+        assert result.ai_tags == ["캔버스백", "수납공간", "데일리백", "숄더스트랩"]
 
     def test_ai_tags_empty_when_missing(self):
         """Backward compat: old VLM output without AI태그 line."""

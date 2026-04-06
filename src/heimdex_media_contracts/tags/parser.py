@@ -2,10 +2,11 @@
 
 The VLM produces line-based output in this format::
 
-    설명: 호스트가 수분크림을 손등에 발라 텍스처를 보여주고 있다
-    콘텐츠태그: swatch_test, texture_show, product_demo
-    상품태그: skincare
-    상품명: 수분크림, 히알루론산 세럼
+    설명: <scene description>
+    콘텐츠태그: <keyword_tag1>, <keyword_tag2>
+    상품태그: <product_tag1>
+    상품명: <product_name1>, <product_name2>
+    AI태그: <free_form_tag1>, <free_form_tag2>
 
 This module parses that output into validated tag lists.
 All functions are pure — no I/O, no side effects.
