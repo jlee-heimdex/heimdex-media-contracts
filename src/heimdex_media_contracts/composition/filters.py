@@ -107,7 +107,14 @@ def build_filter_graph(
 # ---------------------------------------------------------------------------
 
 def _build_scale_filter(index: int, clip: SceneClipSpec, output: OutputSpec) -> str:
-    """Scale (and optionally crop) input to output dimensions."""
+    """Scale (and optionally crop) input to output dimensions.
+
+    Also offsets PTS so the extracted clip's timestamps align with its
+    position on the composition canvas. Without this, the overlay
+    ``enable='between(t,...)'`` cannot find matching frames in clips
+    whose timeline_start_ms > 0 (they start at t=0 after extraction).
+    """
+    pts_offset = _ms_to_s(clip.timeline_start_ms)
     if clip.has_crop:
         # Crop first (in source pixel space), then scale to output
         return (
@@ -116,14 +123,16 @@ def _build_scale_filter(index: int, clip: SceneClipSpec, output: OutputSpec) -> 
             f":iw*{clip.crop_x}:ih*{clip.crop_y},"
             f"scale={output.width}:{output.height}:force_original_aspect_ratio=decrease,"
             f"pad={output.width}:{output.height}:(ow-iw)/2:(oh-ih)/2"
-            f":color={output.background_color.replace('#', '0x')}"
+            f":color={output.background_color.replace('#', '0x')},"
+            f"setpts=PTS+{pts_offset}/TB"
             f"[s{index}]"
         )
     return (
         f"[{index}:v]scale={output.width}:{output.height}"
         f":force_original_aspect_ratio=decrease,"
         f"pad={output.width}:{output.height}:(ow-iw)/2:(oh-ih)/2"
-        f":color={output.background_color.replace('#', '0x')}"
+        f":color={output.background_color.replace('#', '0x')},"
+        f"setpts=PTS+{pts_offset}/TB"
         f"[s{index}]"
     )
 
