@@ -31,6 +31,32 @@ BlurJobStatus = Literal["done", "failed", "skipped"]
 
 BlurSourceKind = Literal["proxy", "original"]
 
+BlurJobPhase = Literal[
+    "queued",
+    "initializing",
+    "detecting",
+    "encoding",
+    "uploading",
+    "finalizing",
+]
+
+BlurExportFormat = Literal["prores_4444"]
+
+BlurExportStatus = Literal["queued", "running", "done", "failed", "cancelled"]
+
+
+# ---------- SQS / HTTP message type constants ----------
+#
+# Published so dispatchers on the worker side can route by message type
+# without duplicating string literals. Each constant matches the ``type``
+# field on the corresponding pydantic model below.
+
+BLUR_JOB_CREATED_TYPE = "blur.job_created"
+BLUR_JOB_COMPLETED_TYPE = "blur.job_completed"
+BLUR_JOB_PROGRESS_TYPE = "blur.job_progress"
+BLUR_EXPORT_CREATED_TYPE = "blur.export_created"
+BLUR_EXPORT_COMPLETED_TYPE = "blur.export_completed"
+
 # Mirror of ``heimdex_media_pipelines.blur.config.ALLOWED_CATEGORIES`` so
 # workers can validate without importing the pipeline package. Any change
 # here must land in both repos on the same version.
@@ -111,11 +137,16 @@ class BlurManifest(BaseModel):
     the JSON file and validate via ``BlurManifest.model_validate_json``.
     The ``config`` field stays an untyped dict so library-side changes
     to ``BlurConfig`` don't force a contracts bump.
+
+    ``schema_version`` accepts ``"1"`` (pre-0.10 manifests, no mask
+    layers) and ``"2"`` (current — adds per-category FFV1 mask layers
+    stored under ``mask_s3_keys``). New writes always default to ``"2"``;
+    old manifests remain parseable so re-reads never break.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["1", "2"] = "2"
     pipeline_version: str
     input_path: str
     output_path: str
@@ -124,6 +155,7 @@ class BlurManifest(BaseModel):
     config: dict[str, Any] | None = None
     summary: BlurDetectionSummary
     detections: list[BlurDetectionRecord]
+    mask_s3_keys: dict[BlurCategory, str] | None = None
 
 
 # ---------- control-plane messages ----------
@@ -199,5 +231,97 @@ class BlurJobResult(BaseModel):
     status: BlurJobStatus
     blurred_s3_key: str | None = None
     manifest_s3_key: str | None = None
+    mask_s3_keys: dict[BlurCategory, str] | None = None
     detections_summary: BlurDetectionSummary | None = None
+    error: str | None = None
+
+
+# ---------- progress heartbeat ----------
+
+class BlurJobProgress(BaseModel):
+    """Heartbeat posted by the worker to the API while a blur job runs.
+
+    The pipeline emits progress events through a callback provided by
+    the worker (keeping the pipeline library dependency-free — no HTTP
+    client). The worker converts each event into this payload and POSTs
+    to ``/internal/blur/{job_id}/progress``. The API persists
+    ``progress_pct`` + ``phase`` on the ``blur_jobs`` row so the frontend
+    can render a live bar without polling S3.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal["1"] = "1"
+    type: Literal["blur.job_progress"] = "blur.job_progress"
+    job_id: UUID
+    lease_token: UUID
+    progress_pct: float = Field(..., ge=0.0, le=100.0)
+    phase: BlurJobPhase
+    message: str | None = None
+    eta_seconds: float | None = Field(None, ge=0.0)
+
+
+# ---------- layer export (NLE-compatible ProRes 4444 + alpha) ----------
+
+class BlurExportOptions(BaseModel):
+    """User-selectable options when creating a layer export.
+
+    Immutable once persisted — customers who want a different category
+    subset create a new export against the same parent ``blur_job_id``.
+    Dedupe on ``(blur_job_id, hash(categories|format))`` lives in the
+    API service layer, not the schema.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    categories: tuple[BlurCategory, ...] = Field(..., min_length=1)
+    format: BlurExportFormat = "prores_4444"
+
+
+class BlurExportCreated(BaseModel):
+    """SQS message body for ``blur.export_created``.
+
+    Consumed by drive-blur-worker's dispatcher. The worker downloads the
+    source proxy + the per-category FFV1 masks listed in
+    ``mask_s3_keys`` and composites a single ProRes 4444 ``.mov`` layer
+    (yuva444p10le, alpha-on-blur-regions) using ``ffmpeg -filter_complex``.
+
+    ``mask_s3_keys`` is already filtered to the categories requested by
+    the user — the worker doesn't re-filter.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal["1"] = "1"
+    type: Literal["blur.export_created"] = "blur.export_created"
+    timestamp: datetime
+    export_id: UUID
+    blur_job_id: UUID
+    file_id: UUID
+    org_id: UUID
+    video_id: str
+    source_s3_key: str
+    mask_s3_keys: dict[BlurCategory, str] = Field(..., min_length=1)
+    options: BlurExportOptions
+
+
+class BlurExportResult(BaseModel):
+    """Callback envelope from drive-blur-worker to the API export
+    ``/internal/blur/exports/{export_id}/complete`` endpoint.
+
+    On success, ``layer_s3_key`` points at the uploaded
+    ``.mov``; on failure, ``error`` carries a short human-readable
+    string and ``layer_s3_key`` stays ``None``. Consumers fetch the
+    layer itself via a presigned URL from the API — the key is never
+    exposed to the frontend directly.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal["1"] = "1"
+    type: Literal["blur.export_completed"] = "blur.export_completed"
+    export_id: UUID
+    lease_token: UUID
+    status: BlurExportStatus
+    layer_s3_key: str | None = None
     error: str | None = None
