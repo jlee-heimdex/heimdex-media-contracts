@@ -117,7 +117,11 @@ class SceneClipSpec(BaseModel):
     @field_validator("end_ms")
     @classmethod
     def _end_after_start(cls, v: int, info) -> int:
-        start = info.data.get("start_ms")
+        # ValidationInfo.data is None during JSON-mode round-trip
+        # validation on newer pydantic (>=2.7); treat missing siblings
+        # as "can't compare" and defer to the downstream check.
+        data = info.data or {}
+        start = data.get("start_ms")
         if start is not None and v <= start:
             raise ValueError(f"end_ms ({v}) must be > start_ms ({start})")
         return v
@@ -233,7 +237,11 @@ class SubtitleSpec(BaseModel):
     @field_validator("end_ms")
     @classmethod
     def _end_after_start(cls, v: int, info) -> int:
-        start = info.data.get("start_ms")
+        # ValidationInfo.data is None during JSON-mode round-trip
+        # validation on newer pydantic (>=2.7); treat missing siblings
+        # as "can't compare" and defer to the downstream check.
+        data = info.data or {}
+        start = data.get("start_ms")
         if start is not None and v <= start:
             raise ValueError(f"end_ms ({v}) must be > start_ms ({start})")
         return v
