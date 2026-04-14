@@ -4,8 +4,9 @@ This package must NOT depend on heavy ML/media libraries (cv2, torch, whisper,
 insightface, pyannote, onnxruntime, ffmpeg).
 """
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 
+from heimdex_media_contracts import blur  # noqa: F401
 from heimdex_media_contracts import composition  # noqa: F401
 from heimdex_media_contracts import exports  # noqa: F401
 from heimdex_media_contracts import ingest  # noqa: F401
