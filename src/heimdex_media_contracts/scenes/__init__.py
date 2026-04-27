@@ -20,6 +20,7 @@ from heimdex_media_contracts.scenes.schemas import (
     SceneDocument,
 )
 from heimdex_media_contracts.scenes.splitting import SplitConfig, SplitSignal
+from heimdex_media_contracts.scenes.visual_cuts import VisualCutsDoc
 
 __all__ = [
     "SceneBoundary",
@@ -27,6 +28,7 @@ __all__ = [
     "SceneDetectionResult",
     "SpeechSegmentLike",
     "SegmentInput",
+    "VisualCutsDoc",
     "assign_segments_to_scenes",
     "aggregate_scene_tags",
     "aggregate_transcript",
