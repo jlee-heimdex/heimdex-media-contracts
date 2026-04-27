@@ -86,6 +86,7 @@ Desktop.ini
 # --------------------
 .sisyphus/
 .claude/
+.omc/
 .cursor/
 .aider*
 .codeium/

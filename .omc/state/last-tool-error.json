@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"git pull --rebase origin main 2>&1\",\"description\":\"Pull and rebase on remote main\"}",
-  "error": "Exit code 1\nFrom https://github.com/jlee-heimdex/heimdex-media-contracts\n * branch            main       -> FETCH_HEAD\n   1dc4b33..9fae9ff  main       -> origin/main\nRebasing (1/1)\rAuto-merging src/heimdex_media_contracts/__init__.py\nAuto-merging src/heimdex_media_contracts/composition/__init__.py\nCONFLICT (add/add): Merge conflict in src/heimdex_media_contracts/composition/__init__.py\nAuto-merging src/heimdex_media_contracts/composition/filters.py\nCONFLICT (add/add): Merge conflict in src/heimd...",
-  "timestamp": "2026-03-29T11:03:00.358Z",
-  "retry_count": 2
-}
