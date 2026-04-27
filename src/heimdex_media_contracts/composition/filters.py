@@ -22,6 +22,8 @@ Label conventions:
 
 from __future__ import annotations
 
+import os
+
 from heimdex_media_contracts.composition.schemas import (
     CompositionSpec,
     OutputSpec,
@@ -223,39 +225,64 @@ def _escape_ffmpeg_text(text: str) -> str:
     return text
 
 
-def _resolve_font_path(family: str, weight: int, font_dir: str) -> str:
-    """Map a font family name + weight to a font file path.
+class FontNotFoundError(LookupError):
+    """Raised when a font_family cannot be resolved to a file on disk."""
 
-    Supports common Korean fonts used in Heimdex shorts.
-    Falls back to regular weight if bold variant not found.
+
+# Map of supported family → weight → base filename (no extension).
+# The resolver tries _FONT_EXTENSIONS in order and returns the first that
+# exists on disk.
+_FONT_FILE_BASES: dict[str, dict[str, str]] = {
+    "Pretendard": {
+        "Bold": "Pretendard-Bold",
+        "Regular": "Pretendard-Regular",
+    },
+    "Noto Sans KR": {
+        "Bold": "NotoSansKR-Bold",
+        "Regular": "NotoSansKR-Regular",
+    },
+}
+
+# TTF first because that's what we ship today; OTF kept as a fallback so a
+# future asset swap doesn't require a coordinated code change.
+_FONT_EXTENSIONS: tuple[str, ...] = (".ttf", ".otf")
+
+# Public allow-list. Mirrored by SubtitleStyleSpec.font_family Literal in
+# schemas.py and by the frontend FONT_OPTIONS in services/web. Adding a font
+# means: drop the file in every consumer's fonts dir AND extend this tuple
+# AND extend the Literal AND extend the FE list.
+SUPPORTED_FONTS: tuple[str, ...] = tuple(_FONT_FILE_BASES.keys())
+
+
+def _resolve_font_path(family: str, weight: int, font_dir: str) -> str:
+    """Resolve a font family + weight to an existing file on disk.
+
+    Raises ``FontNotFoundError`` if ``family`` is not supported or if no file
+    matching any allowed extension exists in ``font_dir``. We deliberately
+    fail loudly rather than silently substituting a default — a missing font
+    on a render worker is a deploy bug and should crash the job, not produce
+    a video with the wrong typeface.
     """
     font_dir = font_dir.rstrip("/")
-
     weight_suffix = "Bold" if weight >= 600 else "Regular"
 
-    font_map: dict[str, dict[str, str]] = {
-        "Pretendard": {
-            "Bold": f"{font_dir}/Pretendard-Bold.otf",
-            "Regular": f"{font_dir}/Pretendard-Regular.otf",
-        },
-        "Noto Sans KR": {
-            "Bold": f"{font_dir}/NotoSansKR-Bold.otf",
-            "Regular": f"{font_dir}/NotoSansKR-Regular.otf",
-        },
-        "Noto Sans": {
-            "Bold": f"{font_dir}/NotoSans-Bold.ttf",
-            "Regular": f"{font_dir}/NotoSans-Regular.ttf",
-        },
-    }
+    family_bases = _FONT_FILE_BASES.get(family)
+    if family_bases is None:
+        raise FontNotFoundError(
+            f"Unsupported font_family={family!r}; "
+            f"supported families: {SUPPORTED_FONTS}"
+        )
+    base = family_bases[weight_suffix]
 
-    family_fonts = font_map.get(family)
-    if family_fonts:
-        return family_fonts.get(weight_suffix, family_fonts["Regular"])
+    for ext in _FONT_EXTENSIONS:
+        candidate = f"{font_dir}/{base}{ext}"
+        if os.path.exists(candidate):
+            return candidate
 
-    # Fallback: construct path from family name
-    safe_name = family.replace(" ", "")
-    return f"{font_dir}/{safe_name}-{weight_suffix}.otf"
-
+    raise FontNotFoundError(
+        f"No font file found for family={family!r} weight={weight} "
+        f"in {font_dir!r} with extensions {_FONT_EXTENSIONS}"
+    )
 
 def _position_to_ffmpeg_x(position_x: float, text_align: str) -> str:
     """Convert normalized x position + alignment to ffmpeg x expression."""

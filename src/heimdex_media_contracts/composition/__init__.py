@@ -4,7 +4,11 @@ The CompositionSpec is the single contract between the editor UI,
 the API layer, and the ffmpeg render pipeline.
 """
 
-from heimdex_media_contracts.composition.filters import build_filter_graph
+from heimdex_media_contracts.composition.filters import (
+    SUPPORTED_FONTS,
+    FontNotFoundError,
+    build_filter_graph,
+)
 from heimdex_media_contracts.composition.schemas import (
     CompositionSpec,
     OutputSpec,
@@ -15,6 +19,8 @@ from heimdex_media_contracts.composition.schemas import (
 )
 
 __all__ = [
+    "FontNotFoundError",
+    "SUPPORTED_FONTS",
     "CompositionSpec",
     "OutputSpec",
     "SceneClipSpec",
