@@ -167,7 +167,7 @@ class SubtitleStyleSpec(BaseModel):
     Defaults produce a centered white bold caption near the bottom.
     """
 
-    font_family: str = Field(default="Pretendard")
+    font_family: Literal["Pretendard", "Noto Sans KR"] = Field(default="Pretendard")
     font_size_px: int = Field(default=36, ge=8, le=200)
     font_color: str = Field(default="#FFFFFF")
     font_weight: int = Field(default=700, ge=100, le=900)

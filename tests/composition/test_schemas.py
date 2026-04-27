@@ -480,3 +480,24 @@ class TestRoundtrip:
         assert spec.total_duration_ms == 10000
         assert spec.scene_clips[0].volume == 1.0
         assert spec.scene_clips[0].has_crop is False
+
+
+
+class TestSubtitleStyleSpecFontFamilyLiteral:
+    """font_family is a closed Literal — anything outside SUPPORTED_FONTS rejects."""
+
+    def test_pretendard_accepted(self):
+        SubtitleStyleSpec(font_family="Pretendard")
+
+    def test_noto_sans_kr_accepted(self):
+        SubtitleStyleSpec(font_family="Noto Sans KR")
+
+    def test_unsupported_font_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            SubtitleStyleSpec(font_family="Comic Sans")
+
+    def test_empty_string_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            SubtitleStyleSpec(font_family="")
