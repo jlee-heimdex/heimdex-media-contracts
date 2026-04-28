@@ -13,23 +13,15 @@ Design rules:
 
 from __future__ import annotations
 
-import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-
-# ---------------------------------------------------------------------------
-# Color validation
-# ---------------------------------------------------------------------------
-
-_HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
-
-
-def _validate_hex_color(v: str) -> str:
-    if not _HEX_COLOR_RE.match(v):
-        raise ValueError(f"Invalid hex color: {v!r} (expected #RRGGBB or #RRGGBBAA)")
-    return v.upper()
+from heimdex_media_contracts.composition._colors import (
+    _HEX_COLOR_RE,  # noqa: F401 — re-exported for any downstream that imported it
+    _validate_hex_color,
+)
+from heimdex_media_contracts.composition.overlays import OverlaySpec
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +277,7 @@ class CompositionSpec(BaseModel):
     output: OutputSpec = Field(default_factory=OutputSpec)
     scene_clips: list[SceneClipSpec] = Field(min_length=1)
     subtitles: list[SubtitleSpec] = Field(default_factory=list)
+    overlays: list[OverlaySpec] = Field(default_factory=list)
     transitions: list[TransitionSpec] = Field(default_factory=list)
 
     # Metadata (not used by render pipeline, stored for editor state)
@@ -293,10 +286,11 @@ class CompositionSpec(BaseModel):
 
     @property
     def total_duration_ms(self) -> int:
-        """Total timeline duration (clips + subtitles)."""
+        """Total timeline duration (clips + subtitles + overlays)."""
         clip_end = max((c.timeline_end_ms for c in self.scene_clips), default=0)
         sub_end = max((s.end_ms for s in self.subtitles), default=0)
-        return max(clip_end, sub_end)
+        ovl_end = max((o.end_ms for o in self.overlays), default=0)
+        return max(clip_end, sub_end, ovl_end)
 
     @property
     def clip_count(self) -> int:
@@ -305,6 +299,10 @@ class CompositionSpec(BaseModel):
     @property
     def subtitle_count(self) -> int:
         return len(self.subtitles)
+
+    @property
+    def overlay_count(self) -> int:
+        return len(self.overlays)
 
     @property
     def unique_video_ids(self) -> set[str]:
@@ -337,6 +335,18 @@ class CompositionSpec(BaseModel):
                 raise ValueError(
                     f"Subtitle {i} starts at {sub.start_ms}ms but clip timeline "
                     f"ends at {clip_end}ms."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_overlay_bounds(self) -> "CompositionSpec":
+        """V2 overlays must start within the clip timeline (mirrors subtitle rule)."""
+        clip_end = max((c.timeline_end_ms for c in self.scene_clips), default=0)
+        for i, ov in enumerate(self.overlays):
+            if ov.start_ms > clip_end:
+                raise ValueError(
+                    f"Overlay {i} ({ov.kind}) starts at {ov.start_ms}ms but clip "
+                    f"timeline ends at {clip_end}ms."
                 )
         return self
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 
+from heimdex_media_contracts.composition.overlays import OverlaySpec
 from heimdex_media_contracts.composition.schemas import (
     CompositionSpec,
     OutputSpec,
@@ -292,3 +293,77 @@ def _position_to_ffmpeg_x(position_x: float, text_align: str) -> str:
         return f"w*{position_x}-tw"
     # left
     return f"w*{position_x}"
+
+
+# ---------------------------------------------------------------------------
+# V2 overlay filter chain (PNG-overlay path)
+# ---------------------------------------------------------------------------
+
+def build_overlay_filter_chain(
+    *,
+    overlays: list[OverlaySpec],
+    overlay_input_indices: list[int],
+    label_in: str,
+    final_label: str = "vout",
+) -> list[str]:
+    """Build ffmpeg overlay filter strings for V2 overlays.
+
+    Each overlay's effects (opacity, rotation, stroke, shadow with blur and
+    spread) MUST already be baked into the PNG by
+    ``heimdex_media_pipelines.composition.overlay_render.bake_overlay_png``.
+    This function only positions the PNG on the canvas and gates its visibility
+    by ``enable='between(t, start, end)'``.
+
+    Args:
+        overlays: Overlays in render order (back → front). Caller is responsible
+            for sorting by ``layer_index``; this function does NOT re-sort.
+        overlay_input_indices: ffmpeg ``-i`` input index for each overlay's PNG
+            (parallel to ``overlays``). E.g. if 2 clip inputs feed indices 0–1,
+            three overlay PNGs would be at indices [2, 3, 4].
+        label_in: Filtergraph label feeding the first overlay (typically
+            ``f"canvas{n}"`` after clip overlays, or ``"final"`` if the legacy
+            subtitle drawtext chain ran).
+        final_label: Label assigned to the last overlay's output. Caller wires
+            this to ``-map`` for the final video stream.
+
+    Returns:
+        A list of filter strings, one per overlay. Caller appends/extends into
+        its own parts list and joins with ``";\\n"`` like ``build_filter_graph``.
+
+    Raises:
+        ValueError: if ``overlays`` and ``overlay_input_indices`` have mismatched
+            lengths.
+    """
+    if not overlays:
+        return []
+    if len(overlays) != len(overlay_input_indices):
+        raise ValueError(
+            f"overlays ({len(overlays)}) and overlay_input_indices "
+            f"({len(overlay_input_indices)}) must be the same length"
+        )
+
+    parts: list[str] = []
+    current_label = label_in
+    last_idx = len(overlays) - 1
+
+    for i, (ov, input_idx) in enumerate(zip(overlays, overlay_input_indices)):
+        out_label = final_label if i == last_idx else f"ovl{i}"
+
+        # transform.x / .y are normalized [0, 1] and represent the CENTER of
+        # the overlay. ffmpeg's overlay= takes top-left, so subtract w/2 and
+        # h/2 (where w, h are the overlay PNG's intrinsic dims, known to ffmpeg).
+        x_expr = f"W*{ov.transform.x:.4f}-w/2"
+        y_expr = f"H*{ov.transform.y:.4f}-h/2"
+
+        enable_start = _ms_to_s(ov.start_ms)
+        enable_end = _ms_to_s(ov.end_ms)
+
+        parts.append(
+            f"[{current_label}][{input_idx}:v]overlay="
+            f"x={x_expr}:y={y_expr}"
+            f":enable='between(t,{enable_start},{enable_end})'"
+            f"[{out_label}]"
+        )
+        current_label = out_label
+
+    return parts
