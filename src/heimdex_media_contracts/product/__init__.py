@@ -22,6 +22,10 @@ from heimdex_media_contracts.product.prompts import (
 )
 from heimdex_media_contracts.product.schemas import (
     ALLOWED_DURATION_PRESETS,
+    ALLOWED_LANGUAGES,
+    ALLOWED_PRODUCT_DISTRIBUTIONS,
+    ALLOWED_SCAN_INTENTS,
+    ALLOWED_SCAN_MODES,
     ALLOWED_SCAN_STAGES,
     PRODUCT_ENUMERATE_JOB_TYPE,
     PRODUCT_SCAN_COMPLETED_TYPE,
@@ -32,7 +36,9 @@ from heimdex_media_contracts.product.schemas import (
     BBoxXYWH,
     DurationPresetSec,
     EnumerationDetection,
+    Language,
     ProductCatalogEntry,
+    ProductDistribution,
     ProductEnumerateJob,
     ProductScanCompleted,
     ProductScanFailed,
@@ -40,12 +46,18 @@ from heimdex_media_contracts.product.schemas import (
     ProductScanStage,
     ProductTrackJob,
     RejectedReason,
+    ScanIntent,
+    ScanMode,
     StitchingPlan,
     StitchWindow,
 )
 
 __all__ = [
     "ALLOWED_DURATION_PRESETS",
+    "ALLOWED_LANGUAGES",
+    "ALLOWED_PRODUCT_DISTRIBUTIONS",
+    "ALLOWED_SCAN_INTENTS",
+    "ALLOWED_SCAN_MODES",
     "ALLOWED_SCAN_STAGES",
     "ENUMERATION_PROMPT_VERSION",
     "PRODUCT_ENUMERATE_JOB_TYPE",
@@ -58,7 +70,9 @@ __all__ = [
     "DurationPresetSec",
     "EnumerationDetection",
     "EnumerationPrompt",
+    "Language",
     "ProductCatalogEntry",
+    "ProductDistribution",
     "ProductEnumerateJob",
     "ProductScanCompleted",
     "ProductScanFailed",
@@ -66,6 +80,8 @@ __all__ = [
     "ProductScanStage",
     "ProductTrackJob",
     "RejectedReason",
+    "ScanIntent",
+    "ScanMode",
     "StitchingPlan",
     "StitchWindow",
 ]

@@ -28,7 +28,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_core.core_schema import ValidationInfo
 
 
@@ -41,6 +41,10 @@ ProductScanStage = Literal[
     "tracking",
     "assembling",
     "rendering",
+    # v0.14.0 — Phase 4 wizard parent state machine.
+    "preview_ready",   # parent waiting on user commit (Phase 6)
+    "fanned_out",      # parent waiting on N children to terminate
+    "committed",       # parent terminal once all children terminate
     "done",
     "failed",
     "cancelled",
@@ -55,15 +59,54 @@ ALLOWED_SCAN_STAGES: frozenset[str] = frozenset({
     "tracking",
     "assembling",
     "rendering",
+    "preview_ready",
+    "fanned_out",
+    "committed",
     "done",
     "failed",
     "cancelled",
 })
 
-# Allowed clip durations in seconds. Plan §1 locks these to 30/60/90
-# matching the native lengths on Reels / Shorts / TikTok.
+# Allowed clip durations in seconds. Plan §1 locked these to 30/60/90
+# matching the native lengths on Reels / Shorts / TikTok. v0.14.0
+# adds the wizard flow which broadens the range to 10..120 via
+# ``length_seconds`` on ``ProductTrackJob`` (see below). The 30/60/90
+# preset literal stays for backward compat with the legacy
+# enqueue_clip flow during its +4wk deprecation window.
 DurationPresetSec = Literal[30, 60, 90]
 ALLOWED_DURATION_PRESETS: frozenset[int] = frozenset({30, 60, 90})
+
+
+# ---------- v0.14.0 wizard discriminators ----------
+#
+# Phase 4 wizard introduces parent / render-child orchestration on
+# top of the legacy enumerate / track flows. The new fields on
+# ``ProductTrackJob`` below are guarded by ``ScanMode``:
+#
+#   mode='enumerate'    → legacy / current behavior; new fields ignored
+#   mode='scan_order'   → wizard parent — track the whole catalog
+#   mode='render_child' → wizard child — pick a subset + render
+#
+# All new fields are Optional with None default for backward compat:
+# v0.13.0 senders that omit ``mode`` (or set it to 'enumerate') still
+# round-trip through v0.14.0 schemas without modification.
+ScanMode = Literal["enumerate", "scan_order", "render_child"]
+ALLOWED_SCAN_MODES: frozenset[str] = frozenset({
+    "enumerate", "scan_order", "render_child",
+})
+
+# Wizard-only field — drives the picker in the runner / worker.
+ProductDistribution = Literal["single", "multi"]
+ALLOWED_PRODUCT_DISTRIBUTIONS: frozenset[str] = frozenset({"single", "multi"})
+
+# Wizard-only field — drives alignment tokenizer choice.
+Language = Literal["ko", "en"]
+ALLOWED_LANGUAGES: frozenset[str] = frozenset({"ko", "en"})
+
+# Wizard intent — separates preview-flow dedupe from commit-flow dedupe
+# in the API's settings_hash keyspace. Persisted on the parent row.
+ScanIntent = Literal["preview", "commit"]
+ALLOWED_SCAN_INTENTS: frozenset[str] = frozenset({"preview", "commit"})
 
 # Reasons a window or catalog entry was filtered out. Persisted on the
 # row so threshold tuning can be done without re-running tracking.
@@ -337,7 +380,33 @@ class ProductEnumerateJob(BaseModel):
 
 
 class ProductTrackJob(BaseModel):
-    """Message API enqueues for product-track-worker."""
+    """Message API enqueues for product-track-worker.
+
+    v0.14.0 — Phase 4 wizard fields are additive + Optional. A v0.13.0
+    sender that omits ``mode`` (or sets it to ``"enumerate"``) and
+    sets the existing ``catalog_entry_id`` round-trips identically.
+
+    Mode dispatch (worker-side):
+      * ``mode == 'enumerate'`` (default) AND ``catalog_entry_id`` set
+        → legacy single-product flow.
+      * ``mode == 'scan_order'`` AND ``catalog_entry_id`` is None
+        → wizard parent — process the whole video catalog. Wizard
+        fields (``length_seconds``, ``time_range_*_ms``,
+        ``requested_count``, ``product_distribution``, ``language``,
+        ``intent``) are required in this case.
+      * ``mode == 'render_child'`` is reserved — children are NOT
+        enqueued via SQS, they're picked up by the API-process
+        runner from the DB. This literal is kept here so
+        ``ScanMode`` stays a single source of truth across the
+        contract surface.
+
+    The publish-then-pin protocol (see CLAUDE.md):
+    workers MUST be on >= 0.14.0 BEFORE the API publishes
+    ``mode='scan_order'`` messages — ``extra='forbid'`` means a
+    v0.13.0 worker reading a v0.14.0 message with new fields will
+    422. Until v0.14.0 is widely deployed on workers, the API code
+    that publishes scan_order messages should stay flag-gated off.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -345,11 +414,63 @@ class ProductTrackJob(BaseModel):
     job_id: UUID
     org_id: UUID
     video_id: UUID
-    catalog_entry_id: UUID
+    # v0.14.0: now optional. None for ``mode='scan_order'`` parents
+    # (which process the whole catalog); required for legacy
+    # single-product tracking.
+    catalog_entry_id: UUID | None = None
     requested_by_user_id: UUID
-    duration_preset_sec: DurationPresetSec
+    # Legacy field for the +4wk enqueue_clip deprecation window.
+    # Workers on v0.14.0+ should read ``length_seconds`` first and
+    # fall back to ``duration_preset_sec`` only when the new field
+    # is None.
+    duration_preset_sec: DurationPresetSec | None = None
 
     tracker_version: str = Field(..., min_length=1)
     enumeration_prompt_version: str = Field(..., min_length=1)
 
     callback_base_url: str = Field(..., min_length=1)
+
+    # ---------- v0.14.0 wizard fields (all Optional) ----------
+
+    mode: ScanMode = "enumerate"
+
+    # Length the worker / runner targets when stitching. Wizard
+    # accepts 10..120; legacy callers that omit this fall back to
+    # duration_preset_sec on the worker side.
+    length_seconds: int | None = Field(default=None, ge=10, le=120)
+
+    # Number of shorts the parent should fan out into. Required when
+    # mode='scan_order'; ignored otherwise.
+    requested_count: int | None = Field(default=None, ge=1, le=50)
+
+    # Optional source-range filter — pre-filters scenes at coarse
+    # retrieval (codex Q3 corrected: with ±30s soft padding so windows
+    # straddling the boundary aren't lost; the worker handles the
+    # padding logic).
+    time_range_start_ms: int | None = Field(default=None, ge=0)
+    time_range_end_ms: int | None = Field(default=None, gt=0)
+
+    product_distribution: ProductDistribution | None = None
+    language: Language | None = None
+    intent: ScanIntent | None = None
+
+    @model_validator(mode="after")
+    def _time_range_consistent(self) -> "ProductTrackJob":
+        """Cross-field validation for time-range bounds.
+
+        Field validators don't run on default ``None`` values for
+        Optional fields, so a model-level check is the right primitive
+        for "both must be set or both must be None" + "end > start".
+        """
+        start = self.time_range_start_ms
+        end = self.time_range_end_ms
+        if (start is None) != (end is None):
+            raise ValueError(
+                "time_range_start_ms and time_range_end_ms must both be "
+                "set or both be None"
+            )
+        if start is not None and end is not None and end <= start:
+            raise ValueError(
+                "time_range_end_ms must be greater than time_range_start_ms"
+            )
+        return self

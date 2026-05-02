@@ -63,8 +63,9 @@ def test_duration_presets_locked_to_three_values():
 
 
 def test_scan_stages_match_migration_enum():
-    # Mirrors the product_scan_stage Postgres ENUM in migration 051.
-    # Drift here = state machine bugs at runtime.
+    # Mirrors the product_scan_stage Postgres ENUM in migration 051
+    # + 052 (Phase 4 wizard stages added). Drift here = state
+    # machine bugs at runtime.
     assert ALLOWED_SCAN_STAGES == frozenset({
         "queued",
         "enumerating",
@@ -72,6 +73,10 @@ def test_scan_stages_match_migration_enum():
         "tracking",
         "assembling",
         "rendering",
+        # Migration 052 — Phase 4 wizard parent stages.
+        "preview_ready",
+        "fanned_out",
+        "committed",
         "done",
         "failed",
         "cancelled",
@@ -439,3 +444,252 @@ def test_track_job_rejects_off_preset_duration():
             enumeration_prompt_version="v1.0",
             callback_base_url="https://x",
         )
+
+
+# ======================================================================
+# v0.14.0 — Phase 4 wizard fields
+# ======================================================================
+
+
+def test_v014_default_mode_is_enumerate_for_backward_compat():
+    """A v0.13.0 caller that omits ``mode`` should round-trip through
+    the v0.14.0 schema with ``mode='enumerate'`` (legacy behavior).
+    """
+    job = ProductTrackJob(
+        job_id=uuid4(),
+        org_id=uuid4(),
+        video_id=uuid4(),
+        catalog_entry_id=uuid4(),
+        requested_by_user_id=uuid4(),
+        duration_preset_sec=60,
+        tracker_version="v1.0",
+        enumeration_prompt_version="v1.0",
+        callback_base_url="https://x",
+    )
+    assert job.mode == "enumerate"
+    assert job.length_seconds is None
+    assert job.requested_count is None
+    assert job.product_distribution is None
+    assert job.language is None
+    assert job.intent is None
+
+
+def test_v014_old_message_roundtrips_through_new_schema():
+    """A v0.13.0 wire payload (no Phase 4 fields) parses cleanly
+    through a v0.14.0 ProductTrackJob and re-serializes without
+    losing information. Critical for the publish-then-pin window.
+    """
+    from heimdex_media_contracts.product import ProductTrackJob as PTJ
+    legacy_payload = {
+        "type": "product.track_job",
+        "job_id": str(uuid4()),
+        "org_id": str(uuid4()),
+        "video_id": str(uuid4()),
+        "catalog_entry_id": str(uuid4()),
+        "requested_by_user_id": str(uuid4()),
+        "duration_preset_sec": 60,
+        "tracker_version": "v1.0",
+        "enumeration_prompt_version": "v1.0",
+        "callback_base_url": "https://x",
+    }
+    parsed = PTJ.model_validate(legacy_payload)
+    re_serialized = parsed.model_dump(mode="json", exclude_none=True)
+    # Every legacy field round-trips intact.
+    for k, v in legacy_payload.items():
+        assert re_serialized[k] == v
+    # New optional fields stay absent on serialization (exclude_none).
+    assert "mode" in re_serialized  # has a default value of "enumerate"
+    assert re_serialized["mode"] == "enumerate"
+    assert "length_seconds" not in re_serialized
+    assert "requested_count" not in re_serialized
+
+
+def test_v014_scan_order_parent_omits_catalog_entry_id():
+    """Wizard parent: ``mode='scan_order'``, no ``catalog_entry_id``,
+    full set of wizard fields populated.
+    """
+    job = ProductTrackJob(
+        job_id=uuid4(),
+        org_id=uuid4(),
+        video_id=uuid4(),
+        # catalog_entry_id is now Optional — None for parents.
+        requested_by_user_id=uuid4(),
+        tracker_version="v1.0",
+        enumeration_prompt_version="v1.0",
+        callback_base_url="https://x",
+        mode="scan_order",
+        length_seconds=60,
+        requested_count=5,
+        product_distribution="single",
+        language="ko",
+        intent="commit",
+    )
+    assert job.mode == "scan_order"
+    assert job.catalog_entry_id is None
+    assert job.length_seconds == 60
+    assert ProductTrackJob.model_validate_json(job.model_dump_json()) == job
+
+
+def test_v014_length_seconds_validates_range_low():
+    with pytest.raises(ValidationError):
+        ProductTrackJob(
+            job_id=uuid4(),
+            org_id=uuid4(),
+            video_id=uuid4(),
+            requested_by_user_id=uuid4(),
+            tracker_version="v1.0",
+            enumeration_prompt_version="v1.0",
+            callback_base_url="https://x",
+            mode="scan_order",
+            length_seconds=5,  # below 10s floor
+            requested_count=5,
+            product_distribution="single",
+            language="ko",
+            intent="commit",
+        )
+
+
+def test_v014_length_seconds_validates_range_high():
+    with pytest.raises(ValidationError):
+        ProductTrackJob(
+            job_id=uuid4(),
+            org_id=uuid4(),
+            video_id=uuid4(),
+            requested_by_user_id=uuid4(),
+            tracker_version="v1.0",
+            enumeration_prompt_version="v1.0",
+            callback_base_url="https://x",
+            mode="scan_order",
+            length_seconds=180,  # above 120s ceiling (Phase 7 territory)
+            requested_count=5,
+            product_distribution="single",
+            language="ko",
+            intent="commit",
+        )
+
+
+def test_v014_time_range_partial_rejected():
+    """Setting only one bound is invalid — both must be set or both
+    must be None.
+    """
+    with pytest.raises(ValidationError):
+        ProductTrackJob(
+            job_id=uuid4(),
+            org_id=uuid4(),
+            video_id=uuid4(),
+            requested_by_user_id=uuid4(),
+            tracker_version="v1.0",
+            enumeration_prompt_version="v1.0",
+            callback_base_url="https://x",
+            mode="scan_order",
+            length_seconds=60,
+            requested_count=5,
+            product_distribution="single",
+            language="ko",
+            intent="commit",
+            time_range_start_ms=5000,
+            # time_range_end_ms missing — should reject
+        )
+
+
+def test_v014_time_range_inverted_rejected():
+    with pytest.raises(ValidationError):
+        ProductTrackJob(
+            job_id=uuid4(),
+            org_id=uuid4(),
+            video_id=uuid4(),
+            requested_by_user_id=uuid4(),
+            tracker_version="v1.0",
+            enumeration_prompt_version="v1.0",
+            callback_base_url="https://x",
+            mode="scan_order",
+            length_seconds=60,
+            requested_count=5,
+            product_distribution="single",
+            language="ko",
+            intent="commit",
+            time_range_start_ms=10000,
+            time_range_end_ms=5000,  # end < start
+        )
+
+
+def test_v014_field_validator_survives_json_mode_round_trip():
+    """Pydantic 2.7+ passes ``info.data = None`` during JSON-mode
+    round-trip validation. The ``(info.data or {}).get(...)`` guard
+    in ``_time_range_consistent`` must survive — see CLAUDE.md note
+    on the v0.9.1 composition.schemas fix.
+    """
+    job = ProductTrackJob(
+        job_id=uuid4(),
+        org_id=uuid4(),
+        video_id=uuid4(),
+        requested_by_user_id=uuid4(),
+        tracker_version="v1.0",
+        enumeration_prompt_version="v1.0",
+        callback_base_url="https://x",
+        mode="scan_order",
+        length_seconds=60,
+        requested_count=5,
+        product_distribution="single",
+        language="ko",
+        intent="commit",
+        time_range_start_ms=0,
+        time_range_end_ms=600_000,
+    )
+    # JSON-mode round-trip — the validator runs again on parse and
+    # must not crash on info.data=None.
+    parsed = ProductTrackJob.model_validate_json(job.model_dump_json())
+    assert parsed.time_range_start_ms == 0
+    assert parsed.time_range_end_ms == 600_000
+
+
+def test_v014_allowed_scan_modes_consistent():
+    from heimdex_media_contracts.product import ALLOWED_SCAN_MODES
+
+    # Every value of the ScanMode literal must appear in the
+    # frozenset (workers and the API use the frozenset for runtime
+    # validation, so drift between Literal and frozenset is a
+    # contract bug).
+    assert ALLOWED_SCAN_MODES == frozenset({
+        "enumerate", "scan_order", "render_child",
+    })
+
+
+def test_v014_allowed_product_distributions_consistent():
+    from heimdex_media_contracts.product import ALLOWED_PRODUCT_DISTRIBUTIONS
+
+    assert ALLOWED_PRODUCT_DISTRIBUTIONS == frozenset({"single", "multi"})
+
+
+def test_v014_allowed_languages_consistent():
+    from heimdex_media_contracts.product import ALLOWED_LANGUAGES
+
+    assert ALLOWED_LANGUAGES == frozenset({"ko", "en"})
+
+
+def test_v014_allowed_scan_intents_consistent():
+    from heimdex_media_contracts.product import ALLOWED_SCAN_INTENTS
+
+    assert ALLOWED_SCAN_INTENTS == frozenset({"preview", "commit"})
+
+
+def test_v014_extra_fields_still_forbidden():
+    """``extra='forbid'`` is the publish-then-pin substrate. Adding
+    a new field that isn't in this schema must reject — this is what
+    forces deploys to update workers BEFORE the API publishes new
+    shapes.
+    """
+    with pytest.raises(ValidationError):
+        ProductTrackJob.model_validate({
+            "type": "product.track_job",
+            "job_id": str(uuid4()),
+            "org_id": str(uuid4()),
+            "video_id": str(uuid4()),
+            "catalog_entry_id": str(uuid4()),
+            "requested_by_user_id": str(uuid4()),
+            "duration_preset_sec": 60,
+            "tracker_version": "v1.0",
+            "enumeration_prompt_version": "v1.0",
+            "callback_base_url": "https://x",
+            "future_field_not_yet_known": "boom",
+        })
