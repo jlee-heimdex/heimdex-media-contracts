@@ -2,6 +2,53 @@
 
 All notable changes to `heimdex-media-contracts`. Tags trigger PyPI publish.
 
+## [0.15.0] — Spoken-form aliases for STT-based product mention extraction
+
+### Added
+- **`ProductCatalogEntry.spoken_aliases: list[str]`** — additional BM25
+  query terms used by the new `shorts_auto_product` STT track to bridge
+  the catalog-label → host-speech vocabulary gap. Empty default keeps
+  v0.14.0 senders backward-compatible.
+- **`AliasGenerationResponse`** — strict-JSON schema for the per-entry
+  alias generation LLM call. Includes a `field_validator` that rejects
+  sentence-shaped aliases (>30 chars), drops empties, and dedupes
+  case-insensitively.
+- **`AliasGenerationPrompt`** in `product/prompts.py` — own VERSION
+  ("v1.0"), independent calibration story from `EnumerationPrompt`.
+  System message generates 3-5 spoken-form aliases prioritizing
+  brand-Korean-transliteration → brand-only → category-noun → packaging
+  abbreviation. Korean livecommerce-tuned.
+- **`ALIAS_GENERATION_PROMPT_VERSION`** module constant — consumers
+  persist this in `product_catalog_entries.aliases_prompt_version` so a
+  future bump can target stale rows for re-generation.
+
+### Changed
+- (none — all additions are backward-compatible)
+
+### Compatibility
+- **Backward compatible**: v0.14.0 payloads parse cleanly against
+  v0.15.0 — `spoken_aliases` defaults to `[]`. The new field is
+  populated post-hoc by the API (NOT by the enumerate worker), so
+  worker images on v0.14.0 do NOT need to rebuild before the API pin
+  bumps to v0.15.0.
+- **Forward compatibility**: a v0.14.0 worker reading a v0.15.0 catalog
+  payload would 422 because of `extra="forbid"`. Workers do not read
+  `ProductCatalogEntry` payloads from the API in current flows (they
+  only PRODUCE them), so this is a non-issue today. If a future worker
+  flow consumes catalog entries from the API, it must be on v0.15.0+.
+
+### Migration notes for downstream
+- `dev-heimdex-for-livecommerce/services/api`: bump pin to `>=0.15.0`,
+  add migration `054_add_spoken_aliases`, add backfill CLI
+  `app/cli/backfill_spoken_aliases.py`.
+- `services/product-enumerate-worker`: no changes required; existing
+  enumeration prompt (`EnumerationPrompt`, v1.0) is unchanged.
+- `heimdex-media-pipelines`: no changes required.
+
+### Plan reference
+- `dev-heimdex-for-livecommerce/.claude/plans/shorts-auto-product-stt-pivot.md`
+  — STT-based replacement for the SAM2 track path. PR 1a.
+
 ## [0.12.0] — Unreleased
 
 ### Added

@@ -207,9 +207,92 @@ class ProductCatalogEntry(BaseModel):
     enumeration_version: str = Field(..., min_length=1)
     enumeration_prompt_version: str = Field(..., min_length=1)
 
+    # v0.15.0 — spoken-form aliases for STT mention extraction.
+    # Populated post-hoc by the API (NOT by the enumerate worker)
+    # via a per-entry gpt-4o-mini call against ``canonical_crop_s3_key``
+    # + ``llm_label``. The ``shorts_auto_product`` STT track uses
+    # these as additional BM25 query terms against scene
+    # ``transcript_raw`` / ``scene_caption`` to bridge the gap
+    # between catalog labels (read off thumbnails) and how Korean
+    # livecommerce hosts actually pronounce the product
+    # (transliteration variants, brand-only forms, generic
+    # category phrases like "이 클렌즈"). Empty default keeps
+    # v0.14.0 senders backward-compatible — old senders just omit
+    # the field and the default applies on parse.
+    spoken_aliases: list[str] = Field(default_factory=list, max_length=10)
+
     created_at: datetime
     rejected_at: datetime | None = None
     rejected_reason: RejectedReason | None = None
+
+
+# ---------- alias generation response (LLM → API) ----------
+#
+# v0.15.0 — separate post-hoc step: given an existing catalog entry's
+# ``canonical_crop`` image + ``llm_label``, ask gpt-4o-mini to enumerate
+# 3-5 spoken-form aliases. Output validated through this strict schema
+# so a hallucinated response can't poison the catalog.
+#
+# Distinct from ``EnumerationDetection`` because:
+#   - input is a single image + a known label, not a batch of keyframes
+#   - output is name strings, not bboxes / detections
+#   - calibration story is independent — adding aliases doesn't shift
+#     the enumeration recall/precision gates
+
+
+class AliasGenerationResponse(BaseModel):
+    """Strict-JSON output from the alias generation LLM call.
+
+    The model is asked to return up to 5 spoken-form aliases for the
+    given catalog entry (the host's likely pronunciations, brand-only
+    forms, common abbreviations, generic category phrases). Each alias
+    is a short BM25-friendly substring — sentences are rejected.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    aliases: list[str] = Field(
+        ...,
+        min_length=0,
+        max_length=10,
+        description=(
+            "Spoken-form aliases. Each entry is 1-30 characters, "
+            "substring-matchable against transcript text."
+        ),
+    )
+
+    @field_validator("aliases")
+    @classmethod
+    def _alias_shape(cls, v: list[str]) -> list[str]:
+        """Reject sentence-shaped or pathological aliases.
+
+        BM25 + nori works on tokens; an alias that is itself a sentence
+        ('이 제품은 정말 좋습니다') would match too broadly and inject
+        noise. The 30-char cap is generous enough for compound brand
+        names like 'Dalsim fresh-kitchen 오렌지 주스' but tight enough
+        to reject sentence fragments.
+        """
+        cleaned: list[str] = []
+        for raw in v:
+            stripped = raw.strip()
+            if not stripped:
+                # Drop empties silently; LLMs sometimes pad.
+                continue
+            if len(stripped) > 30:
+                raise ValueError(
+                    f"alias too long (>30 chars): {stripped[:40]!r}"
+                )
+            cleaned.append(stripped)
+        # Deduplicate while preserving order — LLMs occasionally repeat.
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for alias in cleaned:
+            key = alias.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(alias)
+        return deduped
 
 
 # ---------- tracking output (worker → API) ----------

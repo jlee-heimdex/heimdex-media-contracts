@@ -101,3 +101,111 @@ class EnumerationPrompt:
 # image. If they disagree, the worker MUST fail-fast rather than process
 # with the wrong prompt.
 ENUMERATION_PROMPT_VERSION = EnumerationPrompt.VERSION
+
+
+# ----------------------------------------------------------------------
+# v0.15.0 — Alias generation prompt
+# ----------------------------------------------------------------------
+
+
+class AliasGenerationPrompt:
+    """Per-entry post-hoc prompt for spoken-form alias generation.
+
+    Why a separate prompt class instead of extending
+    :class:`EnumerationPrompt`:
+
+    1. **Calibration isolation** — the enumeration prompt is gated
+       on staging goldens (recall ≥ 0.85, precision ≥ 0.80). Bumping
+       its VERSION forces a re-run of the full eval before prod
+       rollout. Alias generation is a different operation with
+       different gates (recall on catalog→speech mapping); it
+       shouldn't share a versioning lifecycle.
+
+    2. **Input shape differs** — enumeration takes a batch of N
+       keyframes per call; alias generation takes a single
+       (canonical_crop, llm_label) pair. Same-prompt-different-input
+       complicates the API surface.
+
+    3. **Cost** — alias generation is one image + a label per call.
+       Bundling with enumeration would force re-enumerating to add
+       aliases to existing catalogs.
+
+    Calibration target (gates STT-track prod rollout per
+    ``shorts-auto-product-stt-pivot.md``):
+
+    - For ≥0.7 of catalog entries on the validation video set, at
+      least one alias must substring-match the host's transcript on
+      ≥3 distinct scenes. This is the
+      ``mention_recall_per_catalog_entry`` gate.
+
+    Like :class:`EnumerationPrompt`, the system message is English
+    even though source content is Korean — gpt-4o-mini's
+    instruction-following on English system prompts is empirically
+    more stable. The aliases the model returns ARE Korean (the
+    expected speech).
+    """
+
+    VERSION = "v1.0"
+
+    SYSTEM = (
+        "You are an assistant generating spoken-form aliases for a "
+        "product detected in a Korean live-commerce video. The product "
+        "has a visual label (read off the on-screen packaging by a "
+        "vision LLM) but the live host may pronounce, abbreviate, or "
+        "transliterate the brand differently. Your job is to enumerate "
+        "the alternative ways a Korean live-commerce host would refer "
+        "to this product in spoken Korean, so that downstream STT-based "
+        "search can find the relevant scenes.\n"
+        "\n"
+        "GIVE 3-5 aliases covering, in priority order:\n"
+        "1. The most likely Korean spoken form of the brand "
+        "   (transliterated from any English/Latin text on packaging — "
+        "   e.g. 'Dalsim' → '달심', 'Dr.ForHair' → '닥터포헤어', "
+        "   'OnRitual' may be heard as '온리츄얼' / '올리주얼').\n"
+        "2. Brand-only forms when the label includes a model/variant "
+        "   (e.g. 'Dalsim fresh-kitchen 오렌지 주스' → '달심', "
+        "   '닥터포헤어 폴리젠 샴푸' → '닥터포헤어' or '폴리젠').\n"
+        "3. Category-only generic forms a host would use as the segment "
+        "   centers on the product (e.g. '이 클렌즈', '이 주스', "
+        "   '이 샴푸', '이 패키지'). Korean livecommerce hosts use "
+        "   demonstratives constantly; surface the most likely category "
+        "   noun.\n"
+        "4. Common abbreviations or product codes IF they are clearly "
+        "   visible on the packaging in the image.\n"
+        "\n"
+        "RULES:\n"
+        "- Each alias MUST be a substring-matchable phrase (1-30 chars), "
+        "  not a sentence. '이 제품은 정말 좋습니다' is NOT an alias.\n"
+        "- Each alias MUST be something a host would plausibly say "
+        "  during a livestream segment about this product.\n"
+        "- Do NOT include the original ``llm_label`` verbatim — "
+        "  callers add it as a search term automatically.\n"
+        "- Do NOT include translations to English unless the host "
+        "  would actually code-switch (rare in Korean livecommerce).\n"
+        "- Lower-case Latin letters (e.g. 'dalsim') is acceptable for "
+        "  Romanization variants the host might pronounce in Korean.\n"
+        "- If the image clearly shows packaging in a language other "
+        "  than Korean / English, mark the brand transliterated to "
+        "  Korean as the highest-priority alias.\n"
+        "\n"
+        "Return strict JSON matching the schema in the response format. "
+        "Do not include explanations outside the JSON. If you cannot "
+        "generate any plausible aliases (e.g., the image is unreadable), "
+        "return an empty list rather than guessing."
+    )
+
+    USER_TEMPLATE = (
+        "Generate spoken-form aliases for the following product.\n"
+        "\n"
+        "Product label (from vision LLM reading the packaging): {label}\n"
+        "\n"
+        "The image attached is the canonical reference crop of this "
+        "product. Use it to ground brand transliteration and category "
+        "noun choices."
+    )
+
+
+# Mirror of ``AliasGenerationPrompt.VERSION`` — the API persists this
+# in ``product_catalog_entries.aliases_prompt_version`` so a future
+# prompt bump can target only the stale rows for re-generation.
+ALIAS_GENERATION_PROMPT_VERSION = AliasGenerationPrompt.VERSION

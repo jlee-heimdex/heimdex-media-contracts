@@ -181,6 +181,195 @@ def test_catalog_entry_user_label_optional():
     assert ProductCatalogEntry(**kwargs).user_label.startswith("Cosrx")
 
 
+# ---------- v0.15.0 — spoken_aliases on ProductCatalogEntry ----------
+
+
+def test_v015_catalog_entry_spoken_aliases_defaults_to_empty():
+    """v0.14.0 senders that omit ``spoken_aliases`` must round-trip.
+
+    The whole publish-then-pin story for v0.15.0 hinges on this: an
+    enumerate-worker on v0.14.0 produces JSON without the field; the
+    v0.15.0 API parses it with the default applied.
+    """
+    entry = ProductCatalogEntry(**_catalog_kwargs())
+    assert entry.spoken_aliases == []
+    # JSON roundtrip preserves emptiness.
+    rt = ProductCatalogEntry.model_validate_json(entry.model_dump_json())
+    assert rt.spoken_aliases == []
+
+
+def test_v015_catalog_entry_with_spoken_aliases_roundtrips():
+    kwargs = _catalog_kwargs()
+    kwargs["spoken_aliases"] = ["달심", "Dalsim", "이 주스"]
+    entry = ProductCatalogEntry(**kwargs)
+    assert entry.spoken_aliases == ["달심", "Dalsim", "이 주스"]
+    rt = ProductCatalogEntry.model_validate_json(entry.model_dump_json())
+    assert rt.spoken_aliases == ["달심", "Dalsim", "이 주스"]
+
+
+def test_v015_catalog_entry_spoken_aliases_caps_at_10():
+    """Cap matches the ``max_length=10`` on the field. The DB column
+    stores ``TEXT[]`` with no DB-side cap; the schema enforces the
+    invariant at the worker→API boundary.
+    """
+    kwargs = _catalog_kwargs()
+    kwargs["spoken_aliases"] = [f"alias_{i}" for i in range(11)]
+    with pytest.raises(ValidationError):
+        ProductCatalogEntry(**kwargs)
+
+
+def test_v015_extra_fields_still_forbidden_after_spoken_aliases():
+    """Adding ``spoken_aliases`` must not relax ``extra='forbid'``.
+
+    The whole no-worker-rebuild safety story collapses if a typo in
+    the API payload silently passes through.
+    """
+    kwargs = _catalog_kwargs()
+    kwargs["this_field_does_not_exist"] = "garbage"
+    with pytest.raises(ValidationError, match="extra"):
+        ProductCatalogEntry(**kwargs)
+
+
+# ---------- v0.15.0 — AliasGenerationResponse ----------
+
+
+def test_v015_alias_response_roundtrip():
+    from heimdex_media_contracts.product import AliasGenerationResponse
+
+    resp = AliasGenerationResponse(aliases=["달심", "닥터포헤어", "이 클렌즈"])
+    assert resp.aliases == ["달심", "닥터포헤어", "이 클렌즈"]
+    rt = AliasGenerationResponse.model_validate_json(resp.model_dump_json())
+    assert rt == resp
+
+
+def test_v015_alias_response_rejects_oversize_alias():
+    from heimdex_media_contracts.product import AliasGenerationResponse
+
+    # Sentence-shaped alias — 40+ chars, must be rejected. Substring
+    # matching this against a transcript would over-match dramatically.
+    long_alias = "이 제품은 정말 좋은 제품이고 모든 분께 추천하는 베스트셀러 제품입니다"
+    assert len(long_alias) > 30
+    with pytest.raises(ValidationError, match="too long"):
+        AliasGenerationResponse(aliases=[long_alias])
+
+
+def test_v015_alias_response_drops_empty_strings():
+    """LLMs sometimes pad output with whitespace. Empties drop silently
+    rather than failing — the cap is on alias content, not LLM verbosity.
+    """
+    from heimdex_media_contracts.product import AliasGenerationResponse
+
+    resp = AliasGenerationResponse(aliases=["달심", "  ", "", "Dalsim"])
+    assert resp.aliases == ["달심", "Dalsim"]
+
+
+def test_v015_alias_response_dedupes_case_insensitive():
+    """Korean preserves case; Latin doesn't. Both forms of dedupe needed
+    so 'Dalsim' / 'dalsim' / 'DALSIM' don't bloat the alias list.
+    """
+    from heimdex_media_contracts.product import AliasGenerationResponse
+
+    resp = AliasGenerationResponse(
+        aliases=["Dalsim", "dalsim", "DALSIM", "달심", "달심"],
+    )
+    # First occurrence wins per casefold.
+    assert resp.aliases == ["Dalsim", "달심"]
+
+
+def test_v015_alias_response_accepts_empty_list():
+    """If gpt-4o-mini cannot generate aliases (e.g., unreadable image),
+    it MUST return ``[]`` rather than guess. Schema must accept that.
+    """
+    from heimdex_media_contracts.product import AliasGenerationResponse
+
+    resp = AliasGenerationResponse(aliases=[])
+    assert resp.aliases == []
+
+
+def test_v015_alias_response_caps_at_10():
+    from heimdex_media_contracts.product import AliasGenerationResponse
+
+    with pytest.raises(ValidationError):
+        AliasGenerationResponse(aliases=[f"alias_{i}" for i in range(11)])
+
+
+def test_v015_alias_response_extra_forbidden():
+    from heimdex_media_contracts.product import AliasGenerationResponse
+
+    with pytest.raises(ValidationError, match="extra"):
+        AliasGenerationResponse.model_validate({"aliases": [], "extra": "x"})
+
+
+# ---------- v0.15.0 — AliasGenerationPrompt ----------
+
+
+def test_v015_alias_prompt_version_is_a_string():
+    from heimdex_media_contracts.product import (
+        ALIAS_GENERATION_PROMPT_VERSION,
+        AliasGenerationPrompt,
+    )
+
+    assert isinstance(AliasGenerationPrompt.VERSION, str)
+    assert AliasGenerationPrompt.VERSION
+    assert ALIAS_GENERATION_PROMPT_VERSION == AliasGenerationPrompt.VERSION
+
+
+def test_v015_alias_prompt_version_distinct_from_enumeration():
+    """The whole point of a separate prompt class is independent
+    versioning. Sharing a VERSION constant would re-couple them.
+    """
+    from heimdex_media_contracts.product import (
+        ALIAS_GENERATION_PROMPT_VERSION,
+        ENUMERATION_PROMPT_VERSION,
+    )
+
+    # Allowed to be string-equal at v1.0 since both started fresh,
+    # but the classes must hold independent constants — bumping one
+    # doesn't bump the other.
+    from heimdex_media_contracts.product import (
+        AliasGenerationPrompt,
+        EnumerationPrompt,
+    )
+    assert AliasGenerationPrompt is not EnumerationPrompt
+    assert id(AliasGenerationPrompt.VERSION) != id(EnumerationPrompt.VERSION) \
+        or AliasGenerationPrompt.VERSION == ENUMERATION_PROMPT_VERSION
+    # The mirrored module constants point at their own classes.
+    assert ALIAS_GENERATION_PROMPT_VERSION == AliasGenerationPrompt.VERSION
+    assert ENUMERATION_PROMPT_VERSION == EnumerationPrompt.VERSION
+
+
+def test_v015_alias_prompt_system_message_present():
+    """Plan §6 calibration target requires the prompt to bias toward
+    Korean-host pronunciations + brand transliteration. Guard the key
+    phrases so a future edit can't silently drop them.
+    """
+    from heimdex_media_contracts.product import AliasGenerationPrompt
+
+    sys_msg = AliasGenerationPrompt.SYSTEM
+    # Korean livecommerce host context (drives transliteration bias).
+    assert "korean" in sys_msg.lower()
+    assert "host" in sys_msg.lower()
+    # Brand transliteration is the highest-priority alias type.
+    assert "transliterat" in sys_msg.lower()
+    # Category-only fallback ("이 클렌즈" / "이 주스" pattern).
+    assert "이 " in sys_msg or "category" in sys_msg.lower()
+    # Substring-matchability is a hard constraint — the BM25 layer
+    # downstream relies on it.
+    assert "substring" in sys_msg.lower()
+    # Empty-list-on-failure rule — protects against LLM guessing.
+    assert "empty list" in sys_msg.lower()
+
+
+def test_v015_alias_prompt_user_template_takes_label():
+    from heimdex_media_contracts.product import AliasGenerationPrompt
+
+    rendered = AliasGenerationPrompt.USER_TEMPLATE.format(label="달심 ABC 주스")
+    assert "달심 ABC 주스" in rendered
+    # The template must reference the canonical reference image
+    # (alias generation is grounded in the visual, not just the label).
+    assert "image" in rendered.lower() or "crop" in rendered.lower()
+
+
 # ---------- AppearanceWindow ----------
 
 def _appearance_kwargs():

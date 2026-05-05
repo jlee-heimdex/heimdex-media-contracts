@@ -17,7 +17,9 @@ on the system / ML library boundary.
 """
 
 from heimdex_media_contracts.product.prompts import (
+    ALIAS_GENERATION_PROMPT_VERSION,
     ENUMERATION_PROMPT_VERSION,
+    AliasGenerationPrompt,
     EnumerationPrompt,
 )
 from heimdex_media_contracts.product.schemas import (
@@ -32,6 +34,7 @@ from heimdex_media_contracts.product.schemas import (
     PRODUCT_SCAN_FAILED_TYPE,
     PRODUCT_SCAN_PROGRESS_TYPE,
     PRODUCT_TRACK_JOB_TYPE,
+    AliasGenerationResponse,
     AppearanceWindow,
     BBoxXYWH,
     DurationPresetSec,
@@ -53,6 +56,7 @@ from heimdex_media_contracts.product.schemas import (
 )
 
 __all__ = [
+    "ALIAS_GENERATION_PROMPT_VERSION",
     "ALLOWED_DURATION_PRESETS",
     "ALLOWED_LANGUAGES",
     "ALLOWED_PRODUCT_DISTRIBUTIONS",
@@ -65,6 +69,8 @@ __all__ = [
     "PRODUCT_SCAN_FAILED_TYPE",
     "PRODUCT_SCAN_PROGRESS_TYPE",
     "PRODUCT_TRACK_JOB_TYPE",
+    "AliasGenerationPrompt",
+    "AliasGenerationResponse",
     "AppearanceWindow",
     "BBoxXYWH",
     "DurationPresetSec",
