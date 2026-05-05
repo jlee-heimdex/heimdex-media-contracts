@@ -209,3 +209,149 @@ class AliasGenerationPrompt:
 # in ``product_catalog_entries.aliases_prompt_version`` so a future
 # prompt bump can target only the stale rows for re-generation.
 ALIAS_GENERATION_PROMPT_VERSION = AliasGenerationPrompt.VERSION
+
+
+# ----------------------------------------------------------------------
+# v0.16.0 — Transcript-driven enumeration prompt
+# ----------------------------------------------------------------------
+
+
+class TranscriptEnumerationPrompt:
+    """Transcript-only product enumeration — no frames involved.
+
+    Complements :class:`EnumerationPrompt` (vision over keyframes). The
+    vision path misses two video classes: banner-heavy intros where the
+    keyframe sampler biases toward graphic overlays, and no-clear-visuals
+    verticals like travel commerce (destinations, tours, services that
+    aren't physical objects in frame). This prompt enumerates products
+    purely from what the host says.
+
+    The two paths run in parallel on the same scan trigger; the API
+    merges their catalog outputs by alias overlap. Inline in the API
+    process — no GPU, no worker. Cost is ~$0.003/video against
+    gpt-4o-mini, roughly 10× cheaper than vision enumeration.
+
+    Why a separate prompt class instead of extending
+    :class:`EnumerationPrompt`:
+
+    1. **Input modality differs** — enumeration takes N keyframes;
+       transcript enumeration takes a single concatenated text blob.
+       Same-prompt-different-input complicates the API surface.
+
+    2. **Calibration story is independent** — vision enumeration is
+       gated on visual recall/precision goldens; transcript enumeration
+       is gated on mention precision/recall, which is a different
+       failure mode (host comparison-mention vs actual SKU).
+
+    3. **Aliases are emitted inline** — unlike vision enumeration which
+       produces only a label and requires a separate
+       :class:`AliasGenerationPrompt` pass to produce spoken aliases,
+       this prompt knows the spoken form directly (it just read the
+       transcript) so it returns aliases in the same call. Skips the
+       second LLM hop entirely.
+
+    Calibration target on staging goldens (gates prod rollout per
+    ``shorts-auto-product-stt-enum-2026-05-06.md``):
+
+    - Mention recall: ≥ 0.75 of ground-truth products surfaced
+    - Precision:      ≤ 0.20 false-positive rate (no comparison-brand
+      bleed; no generic-category bleed)
+    - Quote fidelity: 100% of ``example_quote`` substrings must appear
+      verbatim in the source transcript (post-LLM regex check)
+
+    Like :class:`EnumerationPrompt`, the system message is English even
+    though source content is Korean — gpt-4o-mini's instruction-following
+    on English system prompts is empirically more stable. The labels and
+    aliases the model returns ARE Korean.
+    """
+
+    VERSION = "v1.0"
+
+    SYSTEM = (
+        "You are an assistant analyzing a Korean live-commerce video "
+        "transcript to identify the products the host is actively "
+        "selling. The transcript is the only signal — there are no "
+        "frames in this task. Some live-commerce videos sell physical "
+        "goods that are visible on stage; others sell services like "
+        "travel packages, subscriptions, or experiences that have no "
+        "on-camera object at all. Your job covers both.\n"
+        "\n"
+        "INCLUDE products that match ALL of these patterns:\n"
+        "- The host introduces, prices, demonstrates, recommends, or "
+        "  asks viewers to buy the item.\n"
+        "- The mention is sustained — at least two sentences worth of "
+        "  attention, OR a price is named, OR availability/quantity is "
+        "  named.\n"
+        "- The host treats the item as a SKU the viewer can purchase, "
+        "  not a casual reference. Travel destinations, tour packages, "
+        "  subscription tiers, and experiences ALL count when the "
+        "  segment is selling them.\n"
+        "\n"
+        "EXCLUDE these:\n"
+        "- Brands the host names only for comparison ('스타벅스보다 "
+        "  싸요' does NOT make Starbucks a product; the comparator is "
+        "  a foil, not a SKU).\n"
+        "- Generic category nouns ('커피', '옷', '스킨케어') unless "
+        "  the host clearly anchors to a specific SKU within that "
+        "  category in the same passage.\n"
+        "- Items mentioned in a single sentence with no price, no "
+        "  availability, no demonstration — those are passing "
+        "  references, not the segment's product.\n"
+        "- Things the host's voice references but disclaims ('이건 "
+        "  파는 게 아니고요...'). Honor the disclaimer.\n"
+        "- Show sponsors, channel names, or platform branding "
+        "  ('오늘도 G쇼핑과 함께해주셔서') — those are show furniture.\n"
+        "\n"
+        "For each product you list, return:\n"
+        "- llm_label: the canonical Korean name as the host says it. "
+        "  Prefer the form the host uses most often. For travel-like "
+        "  intangibles, use the descriptive phrase the host anchors on "
+        "  (e.g., '제주도 5박6일 패키지').\n"
+        "- spoken_aliases: 2-5 alternative ways the host actually "
+        "  refers to it within the transcript — abbreviations, "
+        "  brand-only forms, demonstratives bound to context "
+        "  ('이 패키지', '요 제품'), transliteration variants. Each "
+        "  alias must be a 1-30 char substring-matchable phrase a host "
+        "  plausibly says, NOT a sentence.\n"
+        "- first_mention_ms: integer milliseconds, the timestamp of the "
+        "  first sustained mention. Use the timestamp marker on the "
+        "  transcript line where the host begins talking about this "
+        "  product, not earlier passing references.\n"
+        "- example_quote: 1-2 sentences VERBATIM from the transcript. "
+        "  Must be a substring of the source transcript text — no "
+        "  paraphrasing, no summarizing, no joining of separate lines. "
+        "  The downstream system will regex-check this; failed checks "
+        "  reject the product.\n"
+        "- confidence: [0.0, 1.0]. Lower for casual mentions, higher "
+        "  when the host names a price, calls out availability, or "
+        "  spends sustained attention on the item.\n"
+        "\n"
+        "Calibration: false positives (extracting a comparison brand or "
+        "a generic category mention) are MORE damaging than false "
+        "negatives in this pipeline — a vision pass runs in parallel "
+        "and catches what you miss. Be conservative. If you cannot "
+        "find any products meeting the inclusion criteria, return an "
+        "empty products list rather than guessing.\n"
+        "\n"
+        "Return strict JSON matching the schema in the response format. "
+        "Do not include explanations outside the JSON."
+    )
+
+    USER_TEMPLATE = (
+        "Below is the transcript of a Korean live-commerce video, "
+        "ordered chronologically. Each line is prefixed with a "
+        "timestamp marker ``[mm:ss]`` indicating when that segment "
+        "begins. List the distinct products the host is selling across "
+        "the whole transcript, deduplicating across multiple mentions "
+        "of the same product.\n"
+        "\n"
+        "Transcript:\n"
+        "{transcript}"
+    )
+
+
+# Mirror of ``TranscriptEnumerationPrompt.VERSION`` — the API persists
+# this in the catalog entry's enumeration_prompt_version (or a parallel
+# column for the STT path) so a future prompt bump can target only the
+# stale rows for re-enumeration. Goldens key on this version.
+TRANSCRIPT_ENUMERATION_PROMPT_VERSION = TranscriptEnumerationPrompt.VERSION

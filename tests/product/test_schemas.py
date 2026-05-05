@@ -882,3 +882,311 @@ def test_v014_extra_fields_still_forbidden():
             "callback_base_url": "https://x",
             "future_field_not_yet_known": "boom",
         })
+
+
+# ======================================================================
+# v0.16.0 — Transcript-driven enumeration
+# ======================================================================
+
+
+# ---------- TranscriptEnumerationPrompt ----------
+
+
+def test_v016_transcript_prompt_version_is_a_string():
+    from heimdex_media_contracts.product import (
+        TRANSCRIPT_ENUMERATION_PROMPT_VERSION,
+        TranscriptEnumerationPrompt,
+    )
+
+    assert isinstance(TranscriptEnumerationPrompt.VERSION, str)
+    assert TranscriptEnumerationPrompt.VERSION
+    assert TRANSCRIPT_ENUMERATION_PROMPT_VERSION == TranscriptEnumerationPrompt.VERSION
+
+
+def test_v016_transcript_prompt_distinct_from_other_prompts():
+    """The whole point of a separate prompt class is independent
+    versioning + an independent calibration story. The classes must
+    be distinct objects so a bump on one doesn't bump the others.
+    """
+    from heimdex_media_contracts.product import (
+        AliasGenerationPrompt,
+        EnumerationPrompt,
+        TranscriptEnumerationPrompt,
+    )
+
+    assert TranscriptEnumerationPrompt is not EnumerationPrompt
+    assert TranscriptEnumerationPrompt is not AliasGenerationPrompt
+
+
+def test_v016_transcript_prompt_system_message_present():
+    """Plan §"Calibration plan" requires the prompt to bias toward
+    Korean-host SKU mentions and exclude comparison brands and
+    generic categories. Guard the key phrases so an edit can't
+    silently drop them and tank the calibration goldens.
+    """
+    from heimdex_media_contracts.product import TranscriptEnumerationPrompt
+
+    sys_msg = TranscriptEnumerationPrompt.SYSTEM
+    sys_lower = sys_msg.lower()
+    # Korean livecommerce context.
+    assert "korean" in sys_lower
+    assert "live-commerce" in sys_lower or "livecommerce" in sys_lower
+    assert "host" in sys_lower
+    # Inclusion rules cover both physical AND service-style SKUs
+    # (travel/tour/subscription) — the no-clear-visuals failure mode.
+    assert "travel" in sys_lower
+    # Exclusion of comparison brands — the canonical false-positive.
+    assert "스타벅스" in sys_msg or "comparison" in sys_lower
+    # Exclusion of generic categories.
+    assert "category" in sys_lower or "generic" in sys_lower
+    # Verbatim-quote requirement — downstream regex check depends on it.
+    assert "verbatim" in sys_lower
+    # Substring-matchability for aliases (BM25 layer relies on it).
+    assert "substring" in sys_lower
+    # Empty-list-on-failure rule — protects against guessing.
+    assert "empty" in sys_lower
+
+
+def test_v016_transcript_prompt_user_template_takes_transcript():
+    from heimdex_media_contracts.product import TranscriptEnumerationPrompt
+
+    rendered = TranscriptEnumerationPrompt.USER_TEMPLATE.format(
+        transcript="[00:05] 안녕하세요\n[00:12] 오늘은 제주도 패키지를 소개합니다",
+    )
+    assert "제주도 패키지" in rendered
+    # Template must mention the timestamp marker convention so the
+    # model knows to extract first_mention_ms from the prefix format.
+    assert "timestamp" in rendered.lower() or "[mm:ss]" in rendered.lower()
+
+
+# ---------- TranscriptEnumeratedProduct ----------
+
+
+def _transcript_product_kwargs():
+    return {
+        "llm_label": "제주도 5박6일 패키지",
+        "spoken_aliases": ["제주 패키지", "5박6일", "제주도 투어"],
+        "first_mention_ms": 245_000,
+        "example_quote": "오늘은 제주도 5박6일 패키지를 39만원에 모시겠습니다.",
+        "confidence": 0.92,
+    }
+
+
+def test_v016_transcript_product_roundtrip():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    p = TranscriptEnumeratedProduct(**_transcript_product_kwargs())
+    rt = TranscriptEnumeratedProduct.model_validate_json(p.model_dump_json())
+    assert rt == p
+
+
+def test_v016_transcript_product_rejects_high_confidence():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["confidence"] = 1.5
+    with pytest.raises(ValidationError):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+def test_v016_transcript_product_rejects_negative_first_mention_ms():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["first_mention_ms"] = -1
+    with pytest.raises(ValidationError):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+def test_v016_transcript_product_rejects_oversize_quote():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["example_quote"] = "가" * 501  # one over the cap
+    with pytest.raises(ValidationError):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+def test_v016_transcript_product_rejects_empty_quote():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["example_quote"] = ""
+    with pytest.raises(ValidationError):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+def test_v016_transcript_product_rejects_empty_label():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["llm_label"] = ""
+    with pytest.raises(ValidationError):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+def test_v016_transcript_product_rejects_oversize_label():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["llm_label"] = "x" * 201
+    with pytest.raises(ValidationError):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+def test_v016_transcript_product_rejects_all_empty_aliases():
+    """Post-clean ge=1 on aliases — if the LLM emits only empties,
+    the prompt instructs it to skip the product entirely. The schema
+    enforces the same.
+    """
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["spoken_aliases"] = ["", "  ", "\t"]
+    with pytest.raises(ValidationError, match="at least 1"):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+def test_v016_transcript_product_rejects_empty_alias_list():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["spoken_aliases"] = []
+    with pytest.raises(ValidationError, match="at least 1"):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+def test_v016_transcript_product_drops_empty_aliases():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["spoken_aliases"] = ["제주 패키지", "  ", "", "5박6일"]
+    p = TranscriptEnumeratedProduct(**kwargs)
+    assert p.spoken_aliases == ["제주 패키지", "5박6일"]
+
+
+def test_v016_transcript_product_dedupes_aliases_case_insensitive():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["spoken_aliases"] = ["Dalsim", "dalsim", "DALSIM", "달심", "달심"]
+    p = TranscriptEnumeratedProduct(**kwargs)
+    # First-occurrence-wins per casefold, mirroring AliasGenerationResponse.
+    assert p.spoken_aliases == ["Dalsim", "달심"]
+
+
+def test_v016_transcript_product_rejects_oversize_alias():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    long_alias = "이 제품은 정말 좋은 제품이고 모든 분께 추천하는 베스트셀러"
+    assert len(long_alias) > 30
+    kwargs["spoken_aliases"] = [long_alias]
+    with pytest.raises(ValidationError, match="too long"):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+def test_v016_transcript_product_caps_aliases_at_10():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["spoken_aliases"] = [f"alias_{i}" for i in range(11)]
+    with pytest.raises(ValidationError):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+def test_v016_transcript_product_extra_forbidden():
+    from heimdex_media_contracts.product import TranscriptEnumeratedProduct
+
+    kwargs = _transcript_product_kwargs()
+    kwargs["future_field"] = "boom"
+    with pytest.raises(ValidationError, match="extra"):
+        TranscriptEnumeratedProduct(**kwargs)
+
+
+# ---------- TranscriptEnumerationResponse ----------
+
+
+def test_v016_transcript_response_roundtrip_with_products():
+    from heimdex_media_contracts.product import (
+        TRANSCRIPT_ENUMERATION_PROMPT_VERSION,
+        TranscriptEnumeratedProduct,
+        TranscriptEnumerationResponse,
+    )
+
+    resp = TranscriptEnumerationResponse(
+        products=[
+            TranscriptEnumeratedProduct(**_transcript_product_kwargs()),
+        ],
+        prompt_version=TRANSCRIPT_ENUMERATION_PROMPT_VERSION,
+        model="gpt-4o-mini",
+    )
+    rt = TranscriptEnumerationResponse.model_validate_json(resp.model_dump_json())
+    assert rt == resp
+
+
+def test_v016_transcript_response_accepts_empty_products():
+    """Empty products is a valid response — the prompt explicitly
+    tells the model to return an empty list rather than guess.
+    Schema must accept that.
+    """
+    from heimdex_media_contracts.product import TranscriptEnumerationResponse
+
+    resp = TranscriptEnumerationResponse(
+        products=[],
+        prompt_version="v1.0",
+        model="gpt-4o-mini",
+    )
+    assert resp.products == []
+    rt = TranscriptEnumerationResponse.model_validate_json(resp.model_dump_json())
+    assert rt == resp
+
+
+def test_v016_transcript_response_caps_products_at_50():
+    from heimdex_media_contracts.product import (
+        TranscriptEnumeratedProduct,
+        TranscriptEnumerationResponse,
+    )
+
+    too_many = [
+        TranscriptEnumeratedProduct(**_transcript_product_kwargs())
+        for _ in range(51)
+    ]
+    with pytest.raises(ValidationError):
+        TranscriptEnumerationResponse(
+            products=too_many,
+            prompt_version="v1.0",
+            model="gpt-4o-mini",
+        )
+
+
+def test_v016_transcript_response_requires_prompt_version():
+    from heimdex_media_contracts.product import TranscriptEnumerationResponse
+
+    with pytest.raises(ValidationError):
+        TranscriptEnumerationResponse(  # type: ignore[call-arg]
+            products=[],
+            model="gpt-4o-mini",
+        )
+
+
+def test_v016_transcript_response_requires_model():
+    from heimdex_media_contracts.product import TranscriptEnumerationResponse
+
+    with pytest.raises(ValidationError):
+        TranscriptEnumerationResponse(  # type: ignore[call-arg]
+            products=[],
+            prompt_version="v1.0",
+        )
+
+
+def test_v016_transcript_response_extra_forbidden():
+    from heimdex_media_contracts.product import TranscriptEnumerationResponse
+
+    with pytest.raises(ValidationError, match="extra"):
+        TranscriptEnumerationResponse.model_validate({
+            "products": [],
+            "prompt_version": "v1.0",
+            "model": "gpt-4o-mini",
+            "extra_field": "boom",
+        })

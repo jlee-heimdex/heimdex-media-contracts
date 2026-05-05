@@ -557,3 +557,123 @@ class ProductTrackJob(BaseModel):
                 "time_range_end_ms must be greater than time_range_start_ms"
             )
         return self
+
+
+# ---------- v0.16.0 — transcript-driven enumeration response ----------
+#
+# Output of the gpt-4o-mini call driven by
+# :class:`TranscriptEnumerationPrompt`. Runs INLINE in the API process
+# (no worker, no GPU) on the same scan trigger as vision enumeration.
+# Catalog merger reconciles the two paths post-hoc by alias overlap.
+#
+# Distinct from :class:`EnumerationDetection` because:
+#   - input is a text transcript, not a batch of keyframes
+#   - output has no bbox / no canonical crop (transcript has no frames)
+#   - aliases are emitted inline (skips the AliasGeneration second hop)
+#   - first_mention_ms is required (anchor for optional Phase 5 visual
+#     back-fill, and ordering for the wizard list)
+#
+# Distinct from :class:`AliasGenerationResponse` because:
+#   - emits whole product entries, not just aliases for an existing one
+#   - input is transcript text, not (canonical_crop + label)
+#   - calibration story is independent from alias-generation calibration
+
+
+class TranscriptEnumeratedProduct(BaseModel):
+    """One product the host actively sells, extracted from the
+    transcript. Aliases are emitted inline so no separate alias
+    generation pass is needed for transcript-discovered entries.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    llm_label: str = Field(..., min_length=1, max_length=200)
+
+    # Aliases the host actually says in the transcript. ``min_length=0``
+    # at the field level so the validator runs first and can drop
+    # whitespace-only entries; the validator then enforces post-clean
+    # ge=1 (the LLM is instructed to skip a product entirely if it
+    # cannot give at least one usable alias). Cap mirrors
+    # ``AliasGenerationResponse`` and ``ProductCatalogEntry.spoken_aliases``.
+    spoken_aliases: list[str] = Field(..., min_length=0, max_length=10)
+
+    # Anchor for ordering in the wizard list and (optionally, Phase 5)
+    # for visual back-fill that samples frames near the first mention.
+    # Milliseconds from the start of the source video.
+    first_mention_ms: int = Field(..., ge=0)
+
+    # Verbatim 1-2 sentence quote from the transcript. The downstream
+    # API call site regex-checks this is an actual substring of the
+    # source transcript before persisting; failed checks reject the
+    # product. Schema only enforces format here.
+    example_quote: str = Field(..., min_length=1, max_length=500)
+
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+    @field_validator("spoken_aliases")
+    @classmethod
+    def _alias_shape(cls, v: list[str]) -> list[str]:
+        """Same cleanup pattern as ``AliasGenerationResponse._alias_shape``,
+        plus a post-clean ge=1 check.
+
+        Sentence-shaped aliases would over-match BM25; the 30-char cap
+        catches them. LLMs occasionally pad with whitespace or repeat
+        case-variants — we drop both. After cleaning, at least one
+        usable alias must remain — if none does, the LLM should have
+        excluded the product entirely.
+        """
+        cleaned: list[str] = []
+        for raw in v:
+            stripped = raw.strip()
+            if not stripped:
+                continue
+            if len(stripped) > 30:
+                raise ValueError(
+                    f"alias too long (>30 chars): {stripped[:40]!r}"
+                )
+            cleaned.append(stripped)
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for alias in cleaned:
+            key = alias.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(alias)
+        if not deduped:
+            raise ValueError(
+                "spoken_aliases must contain at least 1 non-empty alias"
+            )
+        return deduped
+
+
+class TranscriptEnumerationResponse(BaseModel):
+    """Strict-JSON output from the transcript enumeration LLM call.
+
+    Empty ``products`` is a valid response — the prompt explicitly tells
+    the model to return an empty list rather than guess. The API call
+    site treats this as ``no_products_detected_in_transcript`` and lets
+    the parallel vision path drive the wizard.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    products: list[TranscriptEnumeratedProduct] = Field(
+        default_factory=list,
+        max_length=50,
+        description=(
+            "Distinct products the host actively sells. Empty when the "
+            "transcript contains no qualifying mentions."
+        ),
+    )
+
+    # Mirrors the ``VERSION`` constant on
+    # :class:`TranscriptEnumerationPrompt`. Persisted alongside catalog
+    # entries so a future prompt bump can target stale rows.
+    prompt_version: str = Field(..., min_length=1)
+
+    # The OpenAI model identifier used (e.g., ``"gpt-4o-mini"``). Same
+    # role as the ``model`` field on alias generation results — lets
+    # the API trace which model variant produced the output for
+    # cost/quality analysis.
+    model: str = Field(..., min_length=1)

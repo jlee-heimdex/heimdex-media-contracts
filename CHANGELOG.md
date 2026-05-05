@@ -2,6 +2,65 @@
 
 All notable changes to `heimdex-media-contracts`. Tags trigger PyPI publish.
 
+## [0.16.0] — Transcript-driven product enumeration for auto-shorts product mode
+
+### Added
+- **`TranscriptEnumerationPrompt`** in `product/prompts.py` — own
+  `VERSION = "v1.0"`, independent calibration story from
+  `EnumerationPrompt` (vision keyframe pass) and `AliasGenerationPrompt`
+  (per-entry alias generation). System message is Korean-livecommerce
+  tuned, exclude-rules cover comparison brands and generic categories,
+  inclusion rules cover both physical-good livecommerce AND no-clear-
+  visuals verticals (travel packages, tour services, subscription
+  tiers). Aliases are emitted inline so transcript-discovered entries
+  skip the second alias-generation hop.
+- **`TranscriptEnumeratedProduct`** in `product/schemas.py` — strict-JSON
+  per-product output: `llm_label` (1-200 chars), `spoken_aliases`
+  (1-10 post-clean, 1-30 char each, dedupe + drop-empties validator
+  matching `AliasGenerationResponse` shape), `first_mention_ms`
+  (ge=0, anchor for ordering and optional Phase 5 visual back-fill),
+  `example_quote` (1-500 char verbatim — API regex-checks substring
+  against source transcript before persist), `confidence` (0-1).
+- **`TranscriptEnumerationResponse`** — wraps `products` list (max 50,
+  empty allowed when no qualifying mentions), `prompt_version`
+  (mirrors `TranscriptEnumerationPrompt.VERSION`), `model` (e.g.,
+  `"gpt-4o-mini"` — for cost/quality tracing).
+- **`TRANSCRIPT_ENUMERATION_PROMPT_VERSION`** module constant —
+  consumers persist this on the catalog entry's prompt-version column
+  (or a parallel column for the STT path) so a future bump can target
+  stale rows for re-enumeration.
+
+### Changed
+- (none — all additions are backward-compatible)
+
+### Compatibility
+- **Backward compatible**: v0.15.0 payloads parse cleanly against
+  v0.16.0 — none of the new types are referenced by existing schemas;
+  this release only ADDS new top-level models and exports. Workers
+  on v0.15.0 do not need to rebuild before consumers pin to v0.16.0.
+- **Forward compatibility**: workers do not produce or consume the
+  new types in this release — transcript enumeration runs INLINE in
+  the API process (no SQS, no worker). The publish-then-pin protocol
+  applies only to the API pin in this release.
+
+### Migration notes for downstream
+- `dev-heimdex-for-livecommerce/services/api`: bump pin to `>=0.16.0`,
+  add migration `055_add_enumeration_source` (new
+  `enumeration_source` CHECK constraint column on
+  `product_catalog_entries`, plus `first_mention_ms` and
+  `example_quote` nullable columns), implement
+  `services/api/app/modules/shorts_auto_product/enumerate_stt/`
+  module that fans out alongside vision enumeration on
+  `POST /api/shorts/auto/products/{video_id}/scan`.
+- `services/product-enumerate-worker`: no changes required;
+  vision-keyframe enumeration prompt (`EnumerationPrompt`, v1.0) is
+  unchanged.
+- `heimdex-media-pipelines`: no changes required.
+
+### Plan reference
+- `dev-heimdex-for-livecommerce/.claude/plans/shorts-auto-product-stt-enum-2026-05-06.md`
+  — STT-first enumeration alongside vision enumeration. PR 1 of 7.
+
 ## [0.15.0] — Spoken-form aliases for STT-based product mention extraction
 
 ### Added

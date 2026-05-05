@@ -19,8 +19,10 @@ on the system / ML library boundary.
 from heimdex_media_contracts.product.prompts import (
     ALIAS_GENERATION_PROMPT_VERSION,
     ENUMERATION_PROMPT_VERSION,
+    TRANSCRIPT_ENUMERATION_PROMPT_VERSION,
     AliasGenerationPrompt,
     EnumerationPrompt,
+    TranscriptEnumerationPrompt,
 )
 from heimdex_media_contracts.product.schemas import (
     ALLOWED_DURATION_PRESETS,
@@ -53,6 +55,8 @@ from heimdex_media_contracts.product.schemas import (
     ScanMode,
     StitchingPlan,
     StitchWindow,
+    TranscriptEnumeratedProduct,
+    TranscriptEnumerationResponse,
 )
 
 __all__ = [
@@ -69,6 +73,7 @@ __all__ = [
     "PRODUCT_SCAN_FAILED_TYPE",
     "PRODUCT_SCAN_PROGRESS_TYPE",
     "PRODUCT_TRACK_JOB_TYPE",
+    "TRANSCRIPT_ENUMERATION_PROMPT_VERSION",
     "AliasGenerationPrompt",
     "AliasGenerationResponse",
     "AppearanceWindow",
@@ -90,4 +95,7 @@ __all__ = [
     "ScanMode",
     "StitchingPlan",
     "StitchWindow",
+    "TranscriptEnumeratedProduct",
+    "TranscriptEnumerationPrompt",
+    "TranscriptEnumerationResponse",
 ]
