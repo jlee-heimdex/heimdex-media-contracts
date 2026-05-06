@@ -216,13 +216,26 @@ def _escape_ffmpeg_text(text: str) -> str:
     """Escape special characters for ffmpeg drawtext filter.
 
     FFmpeg drawtext requires escaping: ' \\ : %
-    Also handle newlines.
+
+    Newlines need TWO backslashes — drawtext interprets ``\\n``
+    in its ``text=`` arg as a line break, but the lavfi filter-graph
+    parser sees the surrounding ``text='…'`` as a single-quoted
+    string and consumes ONE backslash as an escape character before
+    drawtext gets the value. Emitting ``\\\\n`` in the filter
+    expression survives the parser and reaches drawtext as the
+    literal two-character ``\\n`` it needs.
+
+    Pre-fix this produced ``\\n`` (one backslash + n) in the filter
+    expression — the parser stripped the backslash, drawtext
+    received just ``n``, and rendered the literal letter "n"
+    instead of a line break. First exposed by the auto-shorts
+    Korean line-wrap on staging 2026-05-06.
     """
     text = text.replace("\\", "\\\\\\\\")
     text = text.replace("'", "'\\\\\\''")
     text = text.replace(":", "\\\\:")
     text = text.replace("%", "%%")
-    text = text.replace("\n", "\\n")
+    text = text.replace("\n", "\\\\n")
     return text
 
 
