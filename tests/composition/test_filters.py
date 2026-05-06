@@ -49,14 +49,15 @@ class TestEscapeFfmpegText:
         assert _escape_ffmpeg_text("100%") == "100%%"
 
     def test_newline(self):
-        # Output must contain TWO backslashes before the ``n`` so the
-        # lavfi filter-graph parser unescapes one and drawtext receives
-        # the literal ``\n`` it needs to render a line break. Prior to
-        # the 2026-05-06 fix this asserted a single backslash, which
-        # caused ``\n`` to be unescaped away and drawtext to render the
-        # literal letter "n" instead of breaking the line — first hit
-        # in production by the auto-shorts Korean line-wrap.
-        assert _escape_ffmpeg_text("line1\nline2") == "line1\\\\nline2"
+        # Output must contain FOUR backslashes before the ``n``. lavfi
+        # runs two unescape passes over filter option values: 4 → 2 → 1
+        # backslash, so drawtext finally sees ``\n`` (backslash + n) and
+        # renders a newline. The earlier 1-backslash and 2-backslash
+        # variants were both pixel-identical to ``"n"`` (verified by
+        # round-tripping through ffmpeg+drawtext on staging). The
+        # quadruple-escape mirrors the existing ``\\`` → 4× expansion
+        # above — same pairwise consumption, same fix shape.
+        assert _escape_ffmpeg_text("line1\nline2") == "line1\\\\\\\\nline2"
 
     def test_korean(self):
         assert _escape_ffmpeg_text("안녕하세요") == "안녕하세요"

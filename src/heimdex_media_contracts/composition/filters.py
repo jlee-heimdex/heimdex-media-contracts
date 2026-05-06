@@ -217,25 +217,34 @@ def _escape_ffmpeg_text(text: str) -> str:
 
     FFmpeg drawtext requires escaping: ' \\ : %
 
-    Newlines need TWO backslashes — drawtext interprets ``\\n``
-    in its ``text=`` arg as a line break, but the lavfi filter-graph
-    parser sees the surrounding ``text='…'`` as a single-quoted
-    string and consumes ONE backslash as an escape character before
-    drawtext gets the value. Emitting ``\\\\n`` in the filter
-    expression survives the parser and reaches drawtext as the
-    literal two-character ``\\n`` it needs.
+    Newlines need FOUR backslashes in the filter expression to
+    survive lavfi's two-pass unescape and reach drawtext as the
+    two-character ``\\n`` it interprets as a newline:
 
-    Pre-fix this produced ``\\n`` (one backslash + n) in the filter
-    expression — the parser stripped the backslash, drawtext
-    received just ``n``, and rendered the literal letter "n"
-    instead of a line break. First exposed by the auto-shorts
-    Korean line-wrap on staging 2026-05-06.
+      filter expr     →  pass 1 unescape  →  pass 2 unescape  →  drawtext sees
+      ──────────      ──────────────       ──────────────       ─────────────
+      ``\\n`` (1)     →  ``n``            →  ``n``            →  literal "n"
+      ``\\\\n`` (2)   →  ``\\n`` (1)      →  ``n``            →  literal "n"
+      ``\\\\\\\\n``(4)→  ``\\\\n`` (2)    →  ``\\n`` (1)      →  newline ✓
+
+    Same reasoning is why the literal ``\\`` replacement above goes
+    through quadruple-doubling (1 → 4) — both passes have to chew
+    through equally before drawtext gets the un-escaped char.
+
+    First exposed by the auto-shorts Korean line-wrap on staging
+    2026-05-06: pre-fix used a single backslash and rendered the
+    literal letter "n"; the 2-backslash intermediate fix was
+    pixel-identical to the 1-backslash output, confirming both
+    escape passes consume backslashes pairwise. Verified
+    empirically by rendering 1/2/4-backslash variants through the
+    actual ffmpeg+drawtext stack on staging and pixel-comparing
+    the output.
     """
     text = text.replace("\\", "\\\\\\\\")
     text = text.replace("'", "'\\\\\\''")
     text = text.replace(":", "\\\\:")
     text = text.replace("%", "%%")
-    text = text.replace("\n", "\\\\n")
+    text = text.replace("\n", "\\\\\\\\n")
     return text
 
 
