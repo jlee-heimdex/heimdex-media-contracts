@@ -48,16 +48,18 @@ class TestEscapeFfmpegText:
     def test_percent(self):
         assert _escape_ffmpeg_text("100%") == "100%%"
 
-    def test_newline(self):
-        # Output must contain FOUR backslashes before the ``n``. lavfi
-        # runs two unescape passes over filter option values: 4 → 2 → 1
-        # backslash, so drawtext finally sees ``\n`` (backslash + n) and
-        # renders a newline. The earlier 1-backslash and 2-backslash
-        # variants were both pixel-identical to ``"n"`` (verified by
-        # round-tripping through ffmpeg+drawtext on staging). The
-        # quadruple-escape mirrors the existing ``\\`` → 4× expansion
-        # above — same pairwise consumption, same fix shape.
-        assert _escape_ffmpeg_text("line1\nline2") == "line1\\\\\\\\nline2"
+    def test_newline_passthrough(self):
+        # Real LF passes through verbatim. drawtext on ffmpeg 7.1.3
+        # does NOT interpret backslash-escaped newlines in the
+        # ``text=`` option; the only reliable way to get a newline
+        # in the rendered output is to embed a real LF in the
+        # filter expression. ``_build_drawtext_filter`` wraps the
+        # escaped text in single quotes, so the LF is safe inside
+        # the option value (empirically verified on staging
+        # 2026-05-07 by rendering 1/2/4-backslash and real-LF
+        # variants and pixel-comparing — only real-LF rendered an
+        # actual newline).
+        assert _escape_ffmpeg_text("line1\nline2") == "line1\nline2"
 
     def test_korean(self):
         assert _escape_ffmpeg_text("안녕하세요") == "안녕하세요"

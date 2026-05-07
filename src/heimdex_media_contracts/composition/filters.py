@@ -217,34 +217,32 @@ def _escape_ffmpeg_text(text: str) -> str:
 
     FFmpeg drawtext requires escaping: ' \\ : %
 
-    Newlines need FOUR backslashes in the filter expression to
-    survive lavfi's two-pass unescape and reach drawtext as the
-    two-character ``\\n`` it interprets as a newline:
+    Newlines (LF) are passed through unchanged. The 1/2/4-backslash
+    escape variants tried in earlier commits (`c0c3683`, `ff1c8f7`)
+    were all pixel-identical to literal ``\\n``-text on ffmpeg
+    7.1.3 — drawtext does not interpret backslash-escaped newlines
+    in the ``text=`` option at all. The earlier "empirical proofs"
+    were misreads of Python-vs-shell escape collapse. The only
+    reliable way to get a newline into drawtext is a real LF
+    character in the filter expression (verified 2026-05-07 on the
+    staging shorts-render-worker, comparing rendered PNG sizes
+    across all variants — see staging plan
+    ``whisper-guard-and-storyboard-logging-2026-05-07.md``).
 
-      filter expr     →  pass 1 unescape  →  pass 2 unescape  →  drawtext sees
-      ──────────      ──────────────       ──────────────       ─────────────
-      ``\\n`` (1)     →  ``n``            →  ``n``            →  literal "n"
-      ``\\\\n`` (2)   →  ``\\n`` (1)      →  ``n``            →  literal "n"
-      ``\\\\\\\\n``(4)→  ``\\\\n`` (2)    →  ``\\n`` (1)      →  newline ✓
+    ``_build_drawtext_filter`` wraps the escaped text in single
+    quotes (``text='...'``); a literal LF inside those quotes is
+    parsed as part of the option value, so the LF passthrough is
+    safe with the existing call shape.
 
-    Same reasoning is why the literal ``\\`` replacement above goes
-    through quadruple-doubling (1 → 4) — both passes have to chew
-    through equally before drawtext gets the un-escaped char.
-
-    First exposed by the auto-shorts Korean line-wrap on staging
-    2026-05-06: pre-fix used a single backslash and rendered the
-    literal letter "n"; the 2-backslash intermediate fix was
-    pixel-identical to the 1-backslash output, confirming both
-    escape passes consume backslashes pairwise. Verified
-    empirically by rendering 1/2/4-backslash variants through the
-    actual ffmpeg+drawtext stack on staging and pixel-comparing
-    the output.
+    Note: the literal ``\\`` quadruple-doubling on the first line
+    IS still needed — that's a different code path (drawtext's own
+    backslash interpretation, not the ``\\n`` escape) and produces
+    a literal backslash glyph in the rendered text.
     """
     text = text.replace("\\", "\\\\\\\\")
     text = text.replace("'", "'\\\\\\''")
     text = text.replace(":", "\\\\:")
     text = text.replace("%", "%%")
-    text = text.replace("\n", "\\\\\\\\n")
     return text
 
 
