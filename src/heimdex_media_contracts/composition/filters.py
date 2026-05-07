@@ -153,54 +153,100 @@ def _build_drawtext_filter(
     output: OutputSpec,
     font_dir: str,
 ) -> str:
-    """Build a drawtext filter for a single subtitle."""
+    """Build a drawtext filter (or chain) for a single subtitle.
+
+    Multi-line text (``subtitle.text`` containing ``\\n``) is rendered
+    as N chained drawtext filters — one per line, stacked vertically.
+    Empirical 2026-05-07 finding: ffmpeg 7.1.3 ``drawtext`` renders
+    the LF (or any internal line-break char) as a missing-glyph
+    "tofu" rectangle at end-of-line, both with ``text=`` and
+    ``textfile=``. Pre-splitting into per-line filters eliminates
+    the LF entirely from each filter's text, so no glyph artifact
+    appears.
+
+    Side-effect: each line gets its own ``box=1`` background. With
+    default styling (line_spacing=9, boxborderw=11), adjacent boxes
+    visually merge into a continuous strip — close to the
+    single-box look the editor preview suggests, while sidestepping
+    the tofu. If you increase line_spacing past 2× boxborderw, the
+    boxes will visibly separate; that's a styling choice, not a
+    bug.
+    """
     style = subtitle.style
-    escaped_text = _escape_ffmpeg_text(subtitle.text)
-
-    # Resolve font file path
     font_file = _resolve_font_path(style.font_family, style.font_weight, font_dir)
-
-    # Position: convert normalized coordinates to pixel expressions
     x_expr = _position_to_ffmpeg_x(style.position_x, style.text_align)
-    y_expr = f"h*{style.position_y}-th/2"
-
-    # Enable window
     enable_start = _ms_to_s(subtitle.start_ms)
     enable_end = _ms_to_s(subtitle.end_ms)
-
-    # Line spacing from line_height
     line_spacing = int(style.font_size_px * (style.line_height - 1.0))
 
-    parts = [
-        f"fontfile='{font_file}'",
-        f"text='{escaped_text}'",
-        f"fontsize={style.font_size_px}",
-        f"fontcolor={style.font_color}",
-        f"x={x_expr}",
-        f"y={y_expr}",
-        f"line_spacing={line_spacing}",
-        f"enable='between(t,{enable_start},{enable_end})'",
-    ]
+    # Split on real LF — single-line text yields N=1, no behaviour change
+    # vs the pre-2026-05-07 single-filter shape.
+    lines = subtitle.text.split("\n")
+    n_lines = len(lines)
 
-    # Background box
-    if style.has_background:
-        parts.append(f"box=1")
-        parts.append(f"boxcolor={style.background_color}@{style.background_opacity}")
-        parts.append(f"boxborderw={style.background_padding}")
+    # Total visual height of the line stack — used to vertically
+    # center the block at ``h * position_y``. drawtext draws each
+    # line with top-left at the supplied ``y`` expression, so we
+    # compute per-line y as block_top + i * (font_size + line_spacing).
+    block_height = (
+        n_lines * style.font_size_px + (n_lines - 1) * line_spacing
+    )
+    block_top_expr = f"h*{style.position_y}-{block_height}/2"
 
-    # Border/stroke
-    if style.has_stroke:
-        parts.append(f"borderw={style.stroke_width}")
-        parts.append(f"bordercolor={style.stroke_color}")
+    filter_chain: list[str] = []
+    for i, line_text in enumerate(lines):
+        escaped_line = _escape_ffmpeg_text(line_text)
 
-    # Shadow
-    if style.has_shadow:
-        parts.append(f"shadowcolor={style.shadow_color}")
-        parts.append(f"shadowx={style.shadow_offset_x}")
-        parts.append(f"shadowy={style.shadow_offset_y}")
+        line_y_offset = i * (style.font_size_px + line_spacing)
+        y_expr = (
+            block_top_expr if line_y_offset == 0
+            else f"{block_top_expr}+{line_y_offset}"
+        )
 
-    drawtext_args = ":".join(parts)
-    return f"[{label_in}]drawtext={drawtext_args}[{label_out}]"
+        parts = [
+            f"fontfile='{font_file}'",
+            f"text='{escaped_line}'",
+            f"fontsize={style.font_size_px}",
+            f"fontcolor={style.font_color}",
+            f"x={x_expr}",
+            f"y={y_expr}",
+            f"enable='between(t,{enable_start},{enable_end})'",
+        ]
+
+        if style.has_background:
+            parts.append("box=1")
+            parts.append(
+                f"boxcolor={style.background_color}@{style.background_opacity}"
+            )
+            parts.append(f"boxborderw={style.background_padding}")
+
+        if style.has_stroke:
+            parts.append(f"borderw={style.stroke_width}")
+            parts.append(f"bordercolor={style.stroke_color}")
+
+        if style.has_shadow:
+            parts.append(f"shadowcolor={style.shadow_color}")
+            parts.append(f"shadowx={style.shadow_offset_x}")
+            parts.append(f"shadowy={style.shadow_offset_y}")
+
+        # Chain labels: first uses label_in, last uses label_out,
+        # intermediates use ``{label_in}_l{i}`` to stay unique
+        # across multiple subtitles in the same filtergraph.
+        if n_lines == 1:
+            chain_in, chain_out = label_in, label_out
+        elif i == 0:
+            chain_in, chain_out = label_in, f"{label_in}_l0"
+        elif i == n_lines - 1:
+            chain_in, chain_out = f"{label_in}_l{i - 1}", label_out
+        else:
+            chain_in, chain_out = f"{label_in}_l{i - 1}", f"{label_in}_l{i}"
+
+        drawtext_args = ":".join(parts)
+        filter_chain.append(
+            f"[{chain_in}]drawtext={drawtext_args}[{chain_out}]"
+        )
+
+    return ";".join(filter_chain)
 
 
 # ---------------------------------------------------------------------------

@@ -210,6 +210,34 @@ class TestBuildFilterGraph:
         assert "[final]" in fg
         assert fg.count("drawtext") == 2
 
+    def test_multiline_subtitle_splits_into_chained_drawtext(self, fake_font_dir):
+        # Multi-line subtitle text must NOT pass an LF into any
+        # single drawtext ``text=`` value — ffmpeg 7.1.3 renders the
+        # LF as a missing-glyph "tofu" rectangle at end-of-line. The
+        # filter chain instead produces one drawtext per line,
+        # stacked vertically. Empirical 2026-05-07 staging finding;
+        # see ``filters.py::_build_drawtext_filter`` for the long
+        # explanation.
+        fg = build_filter_graph(
+            clips=[_clip()],
+            subtitles=[
+                SubtitleSpec(text="line1\nline2", start_ms=0, end_ms=5000),
+            ],
+            output=OutputSpec(),
+            font_dir=fake_font_dir,
+        )
+        # One subtitle, but two drawtext filters chained for it.
+        assert fg.count("drawtext") == 2
+        # Two distinct text= values (one per line) — no LF inside
+        # either, which is the whole point of this fix. ``\n``
+        # appears in the filtergraph at filter-separator positions
+        # (line-breaks between independent filters); that's
+        # cosmetic and unrelated.
+        assert "text='line1'" in fg
+        assert "text='line2'" in fg
+        assert "text='line1\nline2'" not in fg
+        assert "text='line1\\nline2'" not in fg
+
     def test_overlay_enable_timing(self, fake_font_dir):
         fg = build_filter_graph(
             clips=[
