@@ -2,6 +2,12 @@
 
 All notable changes to `heimdex-media-contracts`. Tags trigger PyPI publish.
 
+## [0.16.3] — No-op release: validate PyPI trusted-publisher rebind to HeimdexDev org
+
+Repo transferred from `jlee-heimdex` to `HeimdexDev` on 2026-05-13.
+Smoke-test tag with no schema changes — exercises the rebinded OIDC
+trusted publisher (`HeimdexDev/heimdex-media-contracts` / `release.yml`).
+
 ## [0.16.0] — Transcript-driven product enumeration for auto-shorts product mode
 
 ### Added
