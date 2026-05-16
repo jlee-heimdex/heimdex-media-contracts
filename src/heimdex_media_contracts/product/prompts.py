@@ -193,6 +193,9 @@ class AliasGenerationPrompt:
         "      element, never '프레첼, 웨하스, 와플' in a single string\n"
         "    * any alias under 4 Korean characters unless it is a "
         "      brand name or transliteration\n"
+        "- When NO image is provided (text-only mode), rely solely "
+        "  on the label. Skip image-grounded brand transliteration "
+        "  confidence; still apply all the above rules.\n"
         "- If the image clearly shows packaging in a language other "
         "  than Korean / English, mark the brand transliterated to "
         "  Korean as the highest-priority alias.\n"
@@ -211,6 +214,14 @@ class AliasGenerationPrompt:
         "The image attached is the canonical reference crop of this "
         "product. Use it to ground brand transliteration and category "
         "noun choices."
+    )
+
+    USER_TEMPLATE_NO_IMAGE = (
+        "Generate spoken-form aliases for the following product. "
+        "No reference image is available — infer from the label "
+        "text alone.\n"
+        "\n"
+        "Product label (from vision LLM reading the packaging): {label}"
     )
 
 
