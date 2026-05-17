@@ -2,6 +2,31 @@
 
 All notable changes to `heimdex-media-contracts`. Tags trigger PyPI publish.
 
+## [0.17.0] — AliasGenerationPrompt v2.0: drop generic aliases + text-only mode
+
+### Changed
+- **`AliasGenerationPrompt.VERSION`** bumped `v1.0` → `v2.0`. Item #3
+  rewritten: the prompt previously requested category-only generic
+  forms (`이 주스`, `이 패키지`) and now explicitly forbids them. New
+  AVOID block enumerates the false-positive patterns (bare category
+  words, demonstratives alone, comma-separated lists, sub-4-char
+  non-brand aliases). Item #4 tightens abbreviation rules to ≥4
+  characters AND distinctive AND visible on packaging.
+
+### Added
+- **`AliasGenerationPrompt.USER_TEMPLATE_NO_IMAGE`** — text-only
+  prompt template for catalog entries that have no `canonical_crop`.
+  Consumers should `getattr`-fallback to `USER_TEMPLATE` until they
+  pin v0.17.0+ (publish-then-pin discipline).
+
+### Notes
+- Schema is unchanged (`AliasGenerationResponse` untouched) —
+  backward-compatible on the wire. No worker rebuild required.
+- The `aliases_prompt_version` column on `product_catalog_entries`
+  starts treating all existing v1.0 rows as stale for the backfill
+  filter. The CLI (`app.cli.backfill_spoken_aliases`) is opt-in;
+  new enumeration scans get v2.0 organically.
+
 ## [0.16.3] — No-op release: validate PyPI trusted-publisher rebind to HeimdexDev org
 
 Repo transferred from `jlee-heimdex` to `HeimdexDev` on 2026-05-13.
