@@ -145,7 +145,7 @@ class AliasGenerationPrompt:
     expected speech).
     """
 
-    VERSION = "v1.0"
+    VERSION = "v2.0"
 
     SYSTEM = (
         "You are an assistant generating spoken-form aliases for a "
@@ -165,13 +165,15 @@ class AliasGenerationPrompt:
         "2. Brand-only forms when the label includes a model/variant "
         "   (e.g. 'Dalsim fresh-kitchen 오렌지 주스' → '달심', "
         "   '닥터포헤어 폴리젠 샴푸' → '닥터포헤어' or '폴리젠').\n"
-        "3. Category-only generic forms a host would use as the segment "
-        "   centers on the product (e.g. '이 클렌즈', '이 주스', "
-        "   '이 샴푸', '이 패키지'). Korean livecommerce hosts use "
-        "   demonstratives constantly; surface the most likely category "
-        "   noun.\n"
-        "4. Common abbreviations or product codes IF they are clearly "
-        "   visible on the packaging in the image.\n"
+        "3. Product-specific distinguishing phrases UNLIKELY to apply "
+        "   to other products in the same catalog (a variant name, a "
+        "   distinctive ingredient/feature the host repeats). Do NOT "
+        "   output a bare category noun or demonstrative — '이 주스', "
+        "   '웨하스', '차' false-positive-match other catalog products "
+        "   and degrade search precision.\n"
+        "4. Common abbreviations or product codes ONLY IF clearly "
+        "   visible on packaging AND at least 4 characters AND "
+        "   distinctive (not a generic category abbreviation).\n"
         "\n"
         "RULES:\n"
         "- Each alias MUST be a substring-matchable phrase (1-30 chars), "
@@ -184,6 +186,16 @@ class AliasGenerationPrompt:
         "  would actually code-switch (rare in Korean livecommerce).\n"
         "- Lower-case Latin letters (e.g. 'dalsim') is acceptable for "
         "  Romanization variants the host might pronounce in Korean.\n"
+        "- AVOID these (they cause cross-product false matches):\n"
+        "    * bare category words ('웨하스', '차', '음료', '주스')\n"
+        "    * demonstratives alone ('이거', '이 제품', '이 패키지')\n"
+        "    * comma-separated lists — output ONE phrase per array "
+        "      element, never '프레첼, 웨하스, 와플' in a single string\n"
+        "    * any alias under 4 Korean characters unless it is a "
+        "      brand name or transliteration\n"
+        "- When NO image is provided (text-only mode), rely solely "
+        "  on the label. Skip image-grounded brand transliteration "
+        "  confidence; still apply all the above rules.\n"
         "- If the image clearly shows packaging in a language other "
         "  than Korean / English, mark the brand transliterated to "
         "  Korean as the highest-priority alias.\n"
@@ -202,6 +214,14 @@ class AliasGenerationPrompt:
         "The image attached is the canonical reference crop of this "
         "product. Use it to ground brand transliteration and category "
         "noun choices."
+    )
+
+    USER_TEMPLATE_NO_IMAGE = (
+        "Generate spoken-form aliases for the following product. "
+        "No reference image is available — infer from the label "
+        "text alone.\n"
+        "\n"
+        "Product label (from vision LLM reading the packaging): {label}"
     )
 
 
